@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>CFBundleName</key><string>iTools</string>
+<key>CFBundleDisplayName</key><string>iTools</string>
+<key>CFBundleIdentifier</key><string>app.itools.mac</string>
+<key>CFBundleExecutable</key><string>ITools</string>
+<key>CFBundlePackageType</key><string>APPL</string>
+<key>CFBundleShortVersionString</key><string>0.6.0</string>
+<key>CFBundleVersion</key><string>8</string>
+<key>CFBundleIconFile</key><string>AppIcon</string>
+<key>LSMinimumSystemVersion</key><string>12.0</string>
+<key>NSPrincipalClass</key><string>NSApplication</string>
+<key>NSHighResolutionCapable</key><true/>
+<key>NSSupportsAutomaticGraphicsSwitching</key><true/>
+<key>NSAppleEventsUsageDescription</key><string>仅在你点击快捷操作时，iTools 通过系统自动化切换外观、Dock、菜单栏或由 Finder 清空废纸篓。</string>
+<key>NSMicrophoneUsageDescription</key><string>iTools 仅在你选择录音或录屏音频时使用麦克风。</string>
+<key>NSScreenCaptureUsageDescription</key><string>iTools 使用屏幕录制权限完成你主动发起的截图、文字识别和录屏。</string>
+<key>CFBundleURLTypes</key><array><dict><key>CFBundleURLName</key><string>iTools Finder Actions</string><key>CFBundleURLSchemes</key><array><string>itools</string></array></dict></array>
+<key>CFBundleDocumentTypes</key><array><dict>
+<key>CFBundleTypeName</key><string>Image</string><key>CFBundleTypeRole</key><string>Editor</string>
+<key>LSHandlerRank</key><string>Alternate</string>
+<key>LSItemContentTypes</key><array><string>public.image</string></array>
+</dict></array>
+</dict></plist>

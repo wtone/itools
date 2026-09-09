@@ -1,0 +1,149 @@
+常用面板	快捷键操作指南	⌥⌘/	app.guide
+快捷操作	剪贴板历史面板	⌥⌘V	quick.clipboard
+剪贴板	快捷短语面板	⌥⇧⌘V	clipboard.snippets
+常用面板	顶部工具面板	⌃⌥Space	app.toolbox
+常用面板	快捷键设置	未设置	app.shortcuts
+快捷操作	区域截图	⌥⇧4	quick.screenshot
+快捷操作	屏幕文字识别	⌥⇧T	quick.ocr
+剪贴板	粘贴队列下一项	⌥⌘B	clipboard.next
+剪贴板	开启 / 暂停剪贴板记录	未设置	clipboard.record
+剪贴板	导入剪贴板历史	未设置	clipboard.import
+剪贴板	导出剪贴板历史	未设置	clipboard.export
+剪贴板	清空剪贴板历史…	未设置	clipboard.clear
+截图与标注	全屏截图	⌥⇧3	capture.full
+截图与标注	延迟 5 秒截图	未设置	capture.delay
+截图与标注	打开图片	未设置	capture.open
+截图与标注	复制当前图片	未设置	capture.copy
+截图与标注	导出当前图片	未设置	capture.export
+截图与标注	当前图片贴图置顶	未设置	capture.pin
+截图与标注	识别当前图片文字 / 二维码	未设置	capture.ocr
+截图与标注	纵向拼接多张图片	未设置	capture.stitch
+截图与标注	撤销上次标注	未设置	capture.undo
+录屏与录音	开始全屏录制	未设置	record.full
+录屏与录音	开始区域录制	未设置	record.region
+录屏与录音	开始录音	未设置	record.audio
+录屏与录音	暂停 / 继续录制	未设置	record.pause
+录屏与录音	停止并保存录制	⌃⌥S	record.stop
+录屏与录音	将录制转换为 GIF	未设置	record.gif
+录屏与录音	裁剪录制视频	未设置	record.trim
+录屏与录音	压缩录制视频	未设置	record.compress
+系统监控	开启 / 暂停系统监控	未设置	monitor.toggle
+访达工具	选择要处理的文件	未设置	files.choose
+访达工具	导入新建文件模板	未设置	files.template
+访达工具	停止磁盘扫描	未设置	files.stopScan
+效率工具	打开临时便笺	未设置	utility.note
+效率工具	打开链接清理	未设置	utility.link
+效率工具	打开二维码生成	未设置	utility.qr
+快捷操作	防止自动休眠	未设置	quick.awake
+快捷操作	系统深色模式	未设置	quick.darkMode
+快捷操作	锁屏	未设置	quick.lockScreen
+快捷操作	保持亮屏	未设置	quick.keepDisplay
+快捷操作	进入屏保	未设置	quick.screenSaver
+快捷操作	清洁屏幕	未设置	quick.cleanScreen
+快捷操作	清洁键盘	未设置	quick.cleanKeyboard
+快捷操作	桌面遮罩	未设置	quick.desktopCover
+快捷操作	自动隐藏 Dock	未设置	quick.dockAutoHide
+快捷操作	自动隐藏菜单栏	未设置	quick.menuBarAutoHide
+快捷操作	访达工具	未设置	quick.files
+快捷操作	显示器设置	未设置	quick.displaySettings
+快捷操作	左半屏	⌃⌥←	quick.leftWindow
+快捷操作	右半屏	⌃⌥→	quick.rightWindow
+快捷操作	最大化窗口	⌃⌥↑	quick.maximize
+快捷操作	还原窗口	⌃⌥↓	quick.restoreWindow
+快捷操作	屏幕取色	未设置	quick.colorPicker
+快捷操作	录屏与录音	未设置	quick.recording
+快捷操作	清空废纸篓	未设置	quick.emptyTrash
+快捷操作	Dock 设置	未设置	quick.dockSettings
+功能页面	打开总览	未设置	page.总览
+功能页面	打开截图与录制	未设置	page.截图与录制
+功能页面	打开剪贴板与短语	未设置	page.剪贴板与短语
+功能页面	打开访达与文件	未设置	page.访达与文件
+功能页面	打开系统状态	未设置	page.系统状态
+功能页面	打开窗口与效率	未设置	page.窗口与效率
+功能页面	打开应用集成	未设置	page.应用集成
+功能页面	打开设置	未设置	page.设置
+窗口布局	左上角	未设置	window.topLeft
+窗口布局	右上角	未设置	window.topRight
+窗口布局	左下角	未设置	window.bottomLeft
+窗口布局	右下角	未设置	window.bottomRight
+窗口布局	左侧三分之一	未设置	window.firstThird
+窗口布局	居中三分之一	未设置	window.middleThird
+窗口布局	右侧三分之一	未设置	window.lastThird
+窗口布局	居中	未设置	window.center
+截图与标注	标注 · 画笔	未设置	mark.画笔
+截图与标注	标注 · 矩形	未设置	mark.矩形
+截图与标注	标注 · 箭头	未设置	mark.箭头
+截图与标注	标注 · 文字	未设置	mark.文字
+截图与标注	标注 · 遮盖	未设置	mark.遮盖
+截图与标注	标注 · 裁剪	未设置	mark.裁剪
+系统监控	菜单栏显示 / 隐藏 CPU	未设置	metric.cpu
+系统监控	菜单栏显示 / 隐藏 内存	未设置	metric.memory
+系统监控	菜单栏显示 / 隐藏 GPU	未设置	metric.gpu
+系统监控	菜单栏显示 / 隐藏 磁盘	未设置	metric.disk
+系统监控	菜单栏显示 / 隐藏 网速	未设置	metric.network
+系统监控	菜单栏显示 / 隐藏 CPU 温度	未设置	metric.temperature
+系统监控	菜单栏显示 / 隐藏 风扇	未设置	metric.fan
+系统应用	打开系统设置	未设置	system.settings
+系统应用	打开磁盘工具	未设置	system.diskUtility
+系统应用	打开系统信息	未设置	system.systemInformation
+系统应用	打开控制台	未设置	system.console
+系统应用	打开活动监视器	未设置	system.activityMonitor
+文件 · 新建文件	文本文件 · TXT	未设置	file.new-txt
+文件 · 新建文件	Markdown	未设置	file.new-md
+文件 · 新建文件	富文本 · RTF	未设置	file.new-rtf
+文件 · 新建文件	JSON	未设置	file.new-json
+文件 · 新建文件	HTML	未设置	file.new-html
+文件 · 新建文件	CSV	未设置	file.new-csv
+文件 · 新建文件	XML	未设置	file.new-xml
+文件 · 新建文件	从自定义模板新建…	未设置	file.new-template
+文件 · 移动、复制与整理	移动文件到…	未设置	file.move
+文件 · 移动、复制与整理	复制文件到…	未设置	file.copy
+文件 · 移动、复制与整理	移动至同步文件夹…	未设置	file.sync-move
+文件 · 移动、复制与整理	剪切	未设置	file.cut
+文件 · 移动、复制与整理	粘贴移动到此处	未设置	file.paste
+文件 · 移动、复制与整理	拷贝文件（夹）名称	未设置	file.copy-name
+文件 · 移动、复制与整理	拷贝路径	未设置	file.copy-path
+文件 · 移动、复制与整理	使用文件名新建文件夹	未设置	file.named-folder
+文件 · 移动、复制与整理	解散文件夹	未设置	file.dissolve
+文件 · 移动、复制与整理	添加到常用目录	未设置	file.favorite
+文件 · 移动、复制与整理	打开常用目录…	未设置	file.favorites
+文件 · 移动、复制与整理	重命名…	未设置	file.rename
+文件 · 图标、分享与打开	设置文件（夹）图标…	未设置	file.icon
+文件 · 图标、分享与打开	恢复默认图标	未设置	file.icon-reset
+文件 · 图标、分享与打开	发送快捷方式到桌面	未设置	file.alias
+文件 · 图标、分享与打开	隔空投送…	未设置	file.airdrop
+文件 · 图标、分享与打开	进入终端	未设置	file.terminal
+文件 · 图标、分享与打开	选择打开方式…	未设置	file.open-with
+文件 · 显示、权限与清理	取消隐藏已选文件	未设置	file.show
+文件 · 显示、权限与清理	隐藏已选文件	未设置	file.hide
+文件 · 显示、权限与清理	隐藏 / 显示文件扩展名	未设置	file.extension
+文件 · 显示、权限与清理	修复乱码文件名…	未设置	file.repair
+文件 · 显示、权限与清理	授予选择的文件写入权限	未设置	file.writable
+文件 · 显示、权限与清理	扫描磁盘 / 文件夹	未设置	file.scan
+文件 · 显示、权限与清理	计算 SHA-256	未设置	file.hash
+文件 · 显示、权限与清理	移到废纸篓	未设置	file.trash
+文件 · 显示、权限与清理	彻底删除…	未设置	file.delete
+文件 · 压缩与加密	快速打包为 7z	未设置	file.fast-7z
+文件 · 压缩与加密	快速打包为 ZIP	未设置	file.fast-zip
+文件 · 压缩与加密	快速打包为 7z 并移到废纸篓	未设置	file.fast-7z-trash
+文件 · 压缩与加密	快速打包为 ZIP 并移到废纸篓	未设置	file.fast-zip-trash
+文件 · 压缩与加密	压缩为 ZIP	未设置	file.zip
+文件 · 压缩与加密	压缩为 ZIP 并移到废纸篓	未设置	file.zip-trash
+文件 · 压缩与加密	加密压缩为 7z…	未设置	file.encrypt-7z
+文件 · 压缩与加密	加密压缩为 ZIP	未设置	file.encrypt-zip
+文件 · 压缩与加密	自定义压缩…	未设置	file.archive
+文件 · 压缩与加密	设置加密密码…	未设置	file.password
+文件 · 压缩与加密	校验压缩包…	未设置	file.archive-test
+文件 · 压缩与加密	用 FastZip 打开	未设置	file.fastzip
+应用集成	打开 iShot	未设置	companion.ishot
+应用集成	打开 iRightMouse	未设置	companion.irightmouse
+应用集成	打开 iCopy	未设置	companion.icopy
+应用集成	打开 State	未设置	companion.state
+剪贴板	复制当前历史项	未设置	clipSelection.copy
+剪贴板	粘贴当前历史项	未设置	clipSelection.paste
+剪贴板	纯文本复制当前历史项	未设置	clipSelection.plainCopy
+剪贴板	纯文本粘贴当前历史项	未设置	clipSelection.plainPaste
+剪贴板	收藏 / 取消收藏当前历史项	未设置	clipSelection.pin
+剪贴板	当前历史项加入粘贴队列	未设置	clipSelection.queue
+剪贴板	删除当前历史项	未设置	clipSelection.delete
+剪贴板	设置当前历史项的分组	未设置	clipSelection.group
