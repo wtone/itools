@@ -20,6 +20,20 @@ final class FinderActionDelegate: NSObject, NSApplicationDelegate {
     private var started = Date()
     private var isTest: Bool { ProcessInfo.processInfo.arguments.contains("--finder-direct-test") }
 
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        // AppKit installs its standard event handlers before this notification.
+        // Registering in init would be overwritten and lose the first request.
+        NSAppleEventManager.shared().setEventHandler(self, andSelector: #selector(receiveLaunch(_:reply:)),
+            forEventClass: FinderLaunchEvent.eventClass, andEventID: FinderLaunchEvent.eventID)
+    }
+
+    @objc private func receiveLaunch(_ event: NSAppleEventDescriptor, reply: NSAppleEventDescriptor) {
+        guard let urls = FinderLaunchEvent.requests(in: event) else {
+            present(title: "无法识别访达操作", text: "请求无效，请重新打开 Finder 右键菜单。"); return
+        }
+        application(NSApp, open: urls)
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
         files.finderDirect = true

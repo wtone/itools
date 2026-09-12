@@ -62,7 +62,8 @@ public enum FinderHostLocation {
 }
 
 /// This scheme is intentionally NOT registered with Launch Services. Only an
-/// explicit open-with-application call delivers it to the accessory worker.
+/// application-open event carries it as data to the accessory worker. Do not
+/// pass it to NSWorkspace.open(urls:): sandboxed callers require a URL association.
 /// The public itools:// route remains a review-only import in the main app.
 public struct FinderDirectRequest {
     public static let scheme = "itools-finder-action"

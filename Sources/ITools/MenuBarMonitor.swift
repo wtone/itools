@@ -50,28 +50,37 @@ final class MenuBarMonitor {
             let item: NSStatusItem
             if let existing = items[metric] { item = existing }
             else {
-                item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+                item = NSStatusBar.system.statusItem(withLength: Self.imageWidth(for: metric) + 8)
                 item.autosaveName = "iTools.metric." + metric.rawValue
                 item.button?.target = target; item.button?.action = #selector(MetricClickTarget.clicked(_:))
                 items[metric] = item
             }
             let reading = MenuBarReading.make(metric, snapshot: snapshot, running: running)
-            let icon = Self.image(for: reading)
-            item.length = icon.size.width + 8
+            let icon = Self.image(for: reading, width: Self.imageWidth(for: metric))
             item.button?.image = icon
             item.button?.imagePosition = .imageOnly
             item.button?.toolTip = reading.tooltip
             item.button?.setAccessibilityLabel(reading.tooltip)
         }
     }
-    static func image(for reading: MenuBarReading) -> NSImage {
+    /// Keep the menu bar's geometry stable across percentage digits and network unit changes.
+    private static func imageWidth(for metric: MenuBarMetric) -> CGFloat { metric == .network ? 70 : 32 }
+    static func image(for reading: MenuBarReading, width fixedWidth: CGFloat? = nil) -> NSImage {
         let font = NSFont.monospacedDigitSystemFont(ofSize: 9, weight: .medium)
         let attributes: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: NSColor.black]
         let top = reading.top as NSString, bottom = reading.bottom as NSString
-        let width = ceil(max(30, max(top.size(withAttributes: attributes).width, bottom.size(withAttributes: attributes).width)))
+        let width = fixedWidth ?? ceil(max(30, max(top.size(withAttributes: attributes).width, bottom.size(withAttributes: attributes).width)))
         let image = NSImage(size: NSSize(width: width, height: 22), flipped: false) { rect in
-            top.draw(at: NSPoint(x: (rect.width-top.size(withAttributes: attributes).width)/2, y: 10.5), withAttributes: attributes)
-            bottom.draw(at: NSPoint(x: (rect.width-bottom.size(withAttributes: attributes).width)/2, y: 0), withAttributes: attributes)
+            for (text, y) in [(top, CGFloat(10.5)), (bottom, CGFloat(0))] {
+                let naturalWidth = text.size(withAttributes: attributes).width
+                let scale = min(1, rect.width / max(1, naturalWidth))
+                // Unusually long driver readings shrink in place instead of moving every other status item.
+                NSGraphicsContext.saveGraphicsState()
+                let transform = NSAffineTransform(); transform.translateX(by: (rect.width - naturalWidth * scale) / 2, yBy: y)
+                transform.scaleX(by: scale, yBy: 1); transform.concat()
+                text.draw(at: .zero, withAttributes: attributes)
+                NSGraphicsContext.restoreGraphicsState()
+            }
             return true
         }
         image.isTemplate = true  // macOS adapts the ink to light/dark menu bars and selection.
@@ -83,6 +92,14 @@ final class MenuBarMonitor {
     }
     func verifyAndExport(snapshot: MonitorSnapshot, destination: URL) throws {
         let all = Set(MenuBarMetric.allCases)
+        update(selected: all, snapshot: snapshot, running: true)
+        let initialLengths = items.mapValues(\.length)
+        for value in [0.0, 9, 99, 100, 999, 9_999, 999_999, 999_999_999, 1_000_000_000] {
+            var changing = snapshot; changing.cpu = min(value, 100)
+            changing.upload = value; changing.download = value; changing.fan = value
+            update(selected: all, snapshot: changing, running: true)
+            guard items.mapValues(\.length) == initialLengths else { throw UserFacingError("Smoke: metric refresh moved menu bar items") }
+        }
         update(selected: all, snapshot: snapshot, running: true)
         guard activeMetrics == all else { throw UserFacingError("Smoke: metric creation failed") }
         update(selected: [.memory, .network], snapshot: snapshot, running: true)
@@ -105,7 +122,7 @@ final class MenuBarMonitor {
         preview.unlockFocus()
         guard let data = preview.png else { throw UserFacingError("Smoke: menu bar image failed") }
         try data.write(to: destination.appendingPathComponent("menu-bar.png"))
-        print("PASS: real status item creation/removal, independent switches, paused readings; GPU \(snapshot.gpuDevices)")
+        print("PASS: real status item creation/removal, independent switches, paused readings, fixed widths across metric/unit changes; GPU \(snapshot.gpuDevices)")
     }
     deinit { stop() }
 }

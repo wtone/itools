@@ -83,7 +83,7 @@ final class RecordingService: NSObject, ObservableObject, AVCaptureFileOutputRec
             AVCaptureDevice.requestAccess(for: .audio) { allowed in
                 DispatchQueue.main.async {
                     if allowed { prepare() }
-                    else { self.state = .idle; NoticeCenter.shared.report(UserFacingError("麦克风权限未开启。请在隐私设置中允许，或关闭麦克风后录屏。")) }
+                    else { self.state = .idle; PermissionCenter.shared.show(.microphone, operation: "录音") }
                 }
             }
         } else { prepare() }

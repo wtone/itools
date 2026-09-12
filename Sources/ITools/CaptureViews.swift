@@ -28,7 +28,7 @@ struct CapturePage: View {
                     }.frame(width: 85)
                     if capture.busy { ProgressView().controlSize(.small) }
                 }.disabled(capture.busy)
-                if capture.document.image != nil { EditorView(capture: capture, document: capture.document) }
+                if capture.document.image != nil { EditorView(capture: capture, document: capture.document).padding(16).instrumentSurface() }
                 else { EmptyState(icon: "viewfinder", title: "从一张截图开始", detail: "拖动选择区域，按空格选择窗口，Esc 取消。也可以打开已有图片进行标注。") }
                 if !capture.recognizedText.isEmpty {
                     SectionBlock(title: "识别结果", detail: "文字与二维码内容") {
@@ -45,7 +45,7 @@ struct CapturePage: View {
                 if !capture.pickedColor.isEmpty { Text("最近取色：" + capture.pickedColor).font(.system(size: 12)).textSelection(.enabled) }
                 if !capture.recent.isEmpty {
                     SectionBlock(title: "最近截图") {
-                        ScrollView(.horizontal) {
+                        GlassScrollView(.horizontal) {
                             HStack(spacing: 12) {
                                 ForEach(Array(capture.recent.prefix(12)), id: \.self) { url in
                                     Button { capture.openImage(url) } label: {
@@ -109,7 +109,7 @@ struct RecordingPage: View {
                     Button("停止并保存") { service.stop() }.buttonStyle(.borderedProminent)
                         .disabled(service.state == .preparing || service.state == .stopping)
                 }
-            }.padding(20).background(Color(NSColor.windowBackgroundColor)).cornerRadius(10)
+            }.padding(20).instrumentSurface()
             VStack(alignment: .leading, spacing: 17) {
                 HStack {
                     Picker("帧率", selection: $service.fps) { Text("15 fps · 省资源").tag(15); Text("30 fps · 日常").tag(30); Text("60 fps · 流畅").tag(60) }.frame(width: 255)

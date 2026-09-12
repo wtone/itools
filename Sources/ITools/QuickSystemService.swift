@@ -66,7 +66,8 @@ final class QuickSystemService: ObservableObject {
         if let error = error {
             let code = error[NSAppleScript.errorNumber] as? Int ?? 0
             let detail = error[NSAppleScript.errorMessage] as? String ?? "系统未完成操作。"
-            NoticeCenter.shared.report(UserFacingError(code == -1743 ? "系统未允许自动化控制。请在「隐私与安全性 → 自动化」允许 iTools 控制 System Events / Finder 后再试。" : detail))
+            if code == -1743 { PermissionCenter.shared.show(.automation, operation: "系统快捷操作") }
+            else { NoticeCenter.shared.report(UserFacingError(detail)) }
             return nil
         }
         return result
@@ -83,7 +84,7 @@ final class QuickSystemService: ObservableObject {
         open(.settings)
     }
     func lockScreen() {
-        guard Permissions.requireAccessibility() else { return }
+        guard Permissions.requireEventPosting(operation: "锁屏") else { return }
         let source = CGEventSource(stateID: .hidSystemState)
         for down in [true, false] {
             let event = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_ANSI_Q), keyDown: down)
@@ -137,7 +138,7 @@ final class CleaningService: ObservableObject {
         screenObserver = NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main) { [weak self] _ in self?.stop() }
     }
     func start(keyboardOnly: Bool) {
-        guard !active, Permissions.requireAccessibility() else { return }
+        guard !active, Permissions.requireAccessibility(operation: "清洁屏幕 / 键盘") else { return }
         let mask = [CGEventType.keyDown, .keyUp, .flagsChanged].reduce(CGEventMask(0)) { $0 | (1 << $1.rawValue) }
         let pointer = Unmanaged.passUnretained(self).toOpaque()
         guard let eventTap = CGEvent.tapCreate(tap: .cgSessionEventTap, place: .headInsertEventTap, options: .defaultTap, eventsOfInterest: mask, callback: { _, type, event, info in

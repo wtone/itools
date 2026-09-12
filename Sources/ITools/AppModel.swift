@@ -4,13 +4,13 @@ import Combine
 import IToolsCore
 
 enum ToolPage: String, CaseIterable, Identifiable {
-    case overview = "总览", capture = "截图与录制", clipboard = "剪贴板与短语", files = "访达与文件", monitor = "系统状态", utilities = "窗口与效率", companions = "应用集成", settings = "设置"
+    case overview = "总览", capture = "截图与录制", clipboard = "剪贴板与短语", files = "访达与文件", monitor = "系统状态", utilities = "窗口与效率", settings = "设置"
     var id: String { rawValue }
     var icon: String {
         switch self {
         case .overview: return "square.grid.2x2"; case .capture: return "viewfinder"; case .clipboard: return "doc.on.clipboard"
         case .files: return "folder"; case .monitor: return "waveform.path.ecg"; case .utilities: return "rectangle.3.offgrid"
-        case .companions: return "app.connected.to.app.below.fill"; case .settings: return "gearshape"
+        case .settings: return "gearshape"
         }
     }
     var subtitle: String {
@@ -21,7 +21,6 @@ enum ToolPage: String, CaseIterable, Identifiable {
         case .files: return "新建、整理与快速打开，少走几层文件夹。"
         case .monitor: return "看看这台 Mac 此刻的工作状态。"
         case .utilities: return "安排好窗口，专注手头的事。"
-        case .companions: return "连接你已安装的工具，使用它们的完整原版功能。"
         case .settings: return "只运行需要的功能，按需授予系统权限。"
         }
     }
@@ -42,14 +41,15 @@ final class AppModel: ObservableObject {
     let quickSystem = QuickSystemService()
     let cleaning = CleaningService()
     let files = FileService()
+    let finderMenu = FinderMenuPreferences(persist: !ProcessInfo.processInfo.arguments.contains("--smoke-test"))
+    let loginItem = LoginItemController()
     let windows = WindowService()
     let awake = AwakeService()
-    let companions = CompanionRegistry()
     var showWindow: (() -> Void)?
     var showClipboard: ((Bool) -> Void)?
     var clipboardSelectionAction: ((String) -> Void)?
     var showGuide: (() -> Void)?
-    var showShortcutSettings: (() -> Void)?
+    var showShortcutSettings: ((ShortcutCategory?) -> Void)?
     var showToolbox: (() -> Void)?
     var performQuickAction: ((QuickAction) -> Void)?
     init() {

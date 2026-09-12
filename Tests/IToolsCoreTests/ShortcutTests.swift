@@ -39,6 +39,25 @@ final class ShortcutTests: XCTestCase {
         ShortcutPreferences(actions: actions, defaults: defaults).set(nil, for: "guide")
         XCTAssertEqual(ShortcutPreferences(actions: extended, defaults: defaults).bindings["future"], .init(3,12))
     }
+    func testRemovedIntegrationBindingsReleaseKeysAndKeepOtherCustomizations() {
+        let retired = ["page.应用集成", "companion.ishot", "companion.irightmouse", "companion.icopy", "companion.state"]
+        let previous = ShortcutPreferences(actions: actions + retired.map { .init($0, $0, "应用集成") }, defaults: defaults)
+        for (index, id) in retired.enumerated() { previous.set(.init(UInt32(index), 15), for: id) }
+        previous.set(nil, for: "guide")
+        previous.set(.init(17, 12), for: "clipboard")
+
+        let upgraded = ShortcutPreferences(actions: actions, defaults: defaults)
+        XCTAssertTrue(retired.allSatisfy { upgraded.bindings[$0] == nil })
+        XCTAssertNil(upgraded.bindings["guide"])
+        XCTAssertEqual(upgraded.bindings["clipboard"], .init(17, 12))
+        // A retired app shortcut must no longer reserve its key or block a built-in action.
+        for index in retired.indices { XCTAssertNil(upgraded.error(for: .init(UInt32(index), 15), action: "delete")) }
+        upgraded.set(.init(0, 15), for: "delete")
+        let restarted = ShortcutPreferences(actions: actions, defaults: defaults)
+        XCTAssertEqual(restarted.bindings["delete"], .init(0, 15))
+        XCTAssertEqual(restarted.bindings["clipboard"], .init(17, 12))
+        XCTAssertTrue(retired.allSatisfy { restarted.bindings[$0] == nil })
+    }
     func testSmokeDoesNotPersistBindingsOrPanelSettings() {
         let prefs = ShortcutPreferences(actions: actions, defaults: defaults, persist: false)
         prefs.set(nil, for: "guide"); prefs.reset()
@@ -85,5 +104,26 @@ final class ShortcutTests: XCTestCase {
             let panel = ClipboardPanelRules.panelFrame(size: CGSize(width: 1020, height: 670), visible: visible, anchor: CGPoint(x: visible.minX, y: visible.maxY))
             XCTAssertTrue(visible.contains(panel)); XCTAssertGreaterThan(panel.width, 0); XCTAssertGreaterThan(panel.height, 0)
         }
+    }
+    func testBottomPanelUsesAvailableScreenWidthAndClearsDock() {
+        let visible = CGRect(x: 0, y: 78, width: 1440, height: 800)
+        let panel = ClipboardPanelRules.bottomPanelFrame(visible: visible)
+        XCTAssertEqual(panel.minX, 8); XCTAssertEqual(panel.maxX, 1432)
+        XCTAssertEqual(panel.minY, 86)
+        XCTAssertTrue(visible.contains(panel)); XCTAssertLessThanOrEqual(panel.height, 360)
+    }
+    func testBottomPanelFitsSmallAndOffsetDisplays() {
+        for visible in [CGRect(x: -1920, y: -1080, width: 1920, height: 1040),
+                        CGRect(x: 1440, y: 100, width: 800, height: 480),
+                        CGRect(x: -500, y: -500, width: 600, height: 240)] {
+            let panel = ClipboardPanelRules.bottomPanelFrame(visible: visible)
+            XCTAssertTrue(visible.contains(panel)); XCTAssertEqual(panel.minY, visible.minY + 8)
+            XCTAssertGreaterThan(panel.width, visible.width * 0.9); XCTAssertGreaterThan(panel.height, 0)
+        }
+    }
+    func testNewPanelDefaultsToBottomAndKeepsExplicitVerticalChoice() {
+        XCTAssertEqual(ClipboardPanelPreferences(defaults: defaults).layout, .horizontal)
+        defaults.set(ClipboardLayout.vertical.rawValue, forKey: "clipboard.panel.layout")
+        XCTAssertEqual(ClipboardPanelPreferences(defaults: defaults).layout, .vertical)
     }
 }

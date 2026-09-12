@@ -49,7 +49,7 @@ public enum LinkTools {
         return c.url
     }
 }
-public enum CapabilityState: String { case builtIn = "内置", companion = "原应用", planned = "待实现" }
+public enum CapabilityState: String { case builtIn = "内置", planned = "待实现" }
 public struct Capability: Identifiable {
     public var id: String
     public var title: String
@@ -65,9 +65,8 @@ public enum CapabilityCatalog {
         .init(id: "finder", title: "访达右键、新建模板、文件整理", state: .builtIn, note: "Finder Sync 扩展需在系统设置启用"),
         .init(id: "monitor", title: "CPU、内存、GPU、磁盘、网络、电池、温度、风扇", state: .builtIn, note: "SMC 为只读；传感器随 Intel 机型而异"),
         .init(id: "windows", title: "窗口布局、防休眠、便笺、链接清理", state: .builtIn, note: "窗口操作需辅助功能权限"),
-        .init(id: "complete", title: "四款参考应用的完整原版功能", state: .companion, note: "连接已安装的合法原应用，在其自身窗口使用"),
-        .init(id: "scroll", title: "自动滚动长截图、带壳截图、视频编辑时间线", state: .planned, note: "当前通过 iShot 原应用提供"),
-        .init(id: "sync", title: "iCloud 同步、全局短语自动展开", state: .planned, note: "当前通过 iCopy 原应用提供"),
+        .init(id: "scroll", title: "自动滚动长截图、带壳截图、视频编辑时间线", state: .planned, note: "当前未提供；需独立实现截图捕获与视频编辑能力"),
+        .init(id: "sync", title: "iCloud 同步、全局短语自动展开", state: .planned, note: "当前未提供；剪贴板历史与短语目前仅在本机使用"),
         .init(id: "mixer", title: "每应用音量、Dock 悬浮预览、鼠标增强", state: .planned, note: "需要独立的 Intel 兼容实现，当前未提供"),
         .init(id: "fan", title: "风扇转速控制、充电上限控制", state: .planned, note: "涉及机型适配与特权辅助进程；目前仅读取")
     ]

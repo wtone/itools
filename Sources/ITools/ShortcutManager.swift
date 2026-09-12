@@ -19,6 +19,7 @@ final class ShortcutManager: ObservableObject {
     var run: ((String) -> Void)?
     private var started = false
     private var suspended = false
+    var isEditing = false
     private var observer: AnyCancellable?
     init() { observer = preferences.objectWillChange.sink { [weak self] in self?.objectWillChange.send() } }
     func display(_ id: String) -> String { preferences.bindings[id]?.display ?? "未设置" }
@@ -28,8 +29,9 @@ final class ShortcutManager: ObservableObject {
     private func number(_ id: String) -> UInt32 { UInt32((preferences.actions.firstIndex { $0.id == id } ?? 0) + 100) }
     private func register(_ chord: KeyChord, for id: String) -> OSStatus {
         HotKeyCenter.shared.register(number(id), key: chord.key, modifiers: chord.carbonModifiers) { [weak self] in
-            guard NSApp.modalWindow == nil, NSApp.keyWindow?.attachedSheet == nil else { return }
-            self?.run?(id)
+            guard let self = self, !self.suspended, !self.isEditing,
+                  NSApp.modalWindow == nil, NSApp.keyWindow?.attachedSheet == nil else { return }
+            self.run?(id)
         }
     }
     func rebuild() {
@@ -58,9 +60,9 @@ final class ShortcutManager: ObservableObject {
 enum AppCommands {
     static let catalog: [ShortcutAction] = {
         var actions: [ShortcutAction] = [
-            .init("app.guide", "快捷键操作指南", "常用面板", "随时查看 iTools 当前按键和操作说明", .init(44, 5)),
+            .init("app.guide", "快捷键与操作指南", "常用面板", "随时查看、修改 iTools 按键和操作说明", .init(44, 5)),
             .init("app.toolbox", "顶部工具面板", "常用面板", "打开或收起状态和快捷操作", .init(49, 12)),
-            .init("app.shortcuts", "快捷键设置", "常用面板", "搜索功能，录入按键组合"),
+            .init("app.shortcuts", "快捷键面板（备用）", "常用面板", "可为同一面板设置另一组按键"),
             .init("clipboard.snippets", "快捷短语面板", "剪贴板", "独立面板中选择常用回复", .init(9, 7)),
             .init("clipboard.next", "粘贴队列下一项", "剪贴板", "粘贴到之前的应用", .init(11, 5)),
             .init("clipboard.record", "开启 / 暂停剪贴板记录", "剪贴板"),
@@ -90,7 +92,6 @@ enum AppCommands {
         actions += MenuBarMetric.allCases.map { .init("metric." + $0.rawValue, "菜单栏显示 / 隐藏 " + $0.title, "系统监控") }
         actions += SystemShortcut.allCases.map { .init("system." + $0.rawValue, "打开" + $0.title, "系统应用") }
         actions += FinderActions.groups.flatMap { group in group.actions.map { .init("file." + $0.id, $0.title, "文件 · " + group.title, "先选择本次处理的文件或目录；保留原有确认步骤") } }
-        actions += [("ishot","iShot"),("irightmouse","iRightMouse"),("icopy","iCopy"),("state","State")].map { .init("companion." + $0.0, "打开 " + $0.1, "应用集成", "未连接时选择已安装的原应用") }
         actions += [("copy","复制当前历史项"),("paste","粘贴当前历史项"),("plainCopy","纯文本复制当前历史项"),("plainPaste","纯文本粘贴当前历史项"),("pin","收藏 / 取消收藏当前历史项"),("queue","当前历史项加入粘贴队列"),("delete","删除当前历史项"),("group","设置当前历史项的分组")].map { .init("clipSelection." + $0.0, $0.1, "剪贴板", "面板打开时操作当前选中项；否则仅打开面板供选择") }
         let priority = ["app.guide", "quick.clipboard", "clipboard.snippets", "app.toolbox", "app.shortcuts", "quick.screenshot", "quick.ocr", "clipboard.next"]
         return priority.compactMap { id in actions.first { $0.id == id } } + actions.filter { !priority.contains($0.id) }
@@ -101,14 +102,13 @@ extension AppModel {
     func performCommand(_ id: String) {
         if id == "app.guide" { showGuide?(); return }
         if id == "app.toolbox" { showToolbox?(); return }
-        if id == "app.shortcuts" { showShortcutSettings?(); return }
+        if id == "app.shortcuts" { showShortcutSettings?(nil); return }
         if id.hasPrefix("clipSelection.") { clipboardSelectionAction?(String(id.dropFirst(14))); return }
         if id.hasPrefix("quick."), let action = QuickAction(rawValue: String(id.dropFirst(6))) { performQuickAction?(action); return }
         if id.hasPrefix("page."), let page = ToolPage(rawValue: String(id.dropFirst(5))) { navigate(page); return }
         if id.hasPrefix("window."), let layout = WindowLayout(rawValue: String(id.dropFirst(7))) { windows.apply(layout); return }
         if id.hasPrefix("metric."), let metric = MenuBarMetric(rawValue: String(id.dropFirst(7))) { menuBar.set(metric, enabled: !menuBar.isEnabled(metric)); return }
         if id.hasPrefix("system."), let system = SystemShortcut(rawValue: String(id.dropFirst(7))) { quickSystem.open(system); return }
-        if id.hasPrefix("companion."), let app = companions.apps.first(where: { $0.id == String(id.dropFirst(10)) }) { companions.open(app); return }
         if id.hasPrefix("utility.") { utilityAnchor = id; navigate(.utilities); return }
         if id.hasPrefix("file."), let action = FinderActions.action(String(id.dropFirst(5))) {
             guard filesEnabled, !files.working else { navigate(.files); return }

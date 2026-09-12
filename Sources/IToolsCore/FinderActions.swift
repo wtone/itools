@@ -11,6 +11,9 @@ public struct FinderActionGroup {
     public let title: String
     public let icon: String
     public let actions: [FinderAction]
+    public init(title: String, icon: String, actions: [FinderAction]) {
+        self.title = title; self.icon = icon; self.actions = actions
+    }
 }
 public enum FinderActions {
     public static let groups: [FinderActionGroup] = [

@@ -90,56 +90,79 @@ enum Panels {
         return alert.runModal() == .alertFirstButtonReturn ? field.stringValue : nil
     }
 }
-enum Permissions {
-    static var screen: Bool { CGPreflightScreenCaptureAccess() }
-    static var accessibility: Bool { AXIsProcessTrusted() }
-    static func requireScreen() -> Bool {
-        if screen { return true }
-        CGRequestScreenCaptureAccess()
-        NoticeCenter.shared.report(UserFacingError("请在系统设置 → 隐私与安全性 → 屏幕录制中允许 iTools，之后重新打开应用。"))
-        return false
-    }
-    static func requireAccessibility() -> Bool {
-        if accessibility { return true }
-        let key = kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String
-        _ = AXIsProcessTrustedWithOptions([key: true] as CFDictionary)
-        NoticeCenter.shared.report(UserFacingError("请在系统设置 → 隐私与安全性 → 辅助功能中允许 iTools，再重试操作。"))
-        return false
-    }
-    static func open(_ pane: String) {
-        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?" + pane) { NSWorkspace.shared.open(url) }
-    }
-}
 final class AppFocus {
     static let shared = AppFocus()
     private(set) var previous: NSRunningApplication?
     private var observer: NSObjectProtocol?
+    private var pastePending = false
     init() {
-        previous = NSWorkspace.shared.frontmostApplication
+        captureFrontmost()
         observer = NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main) { [weak self] note in
             guard let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
-                  app.processIdentifier != ProcessInfo.processInfo.processIdentifier else { return }
+                  self?.isTarget(app) == true else { return }
             self?.previous = app
         }
     }
-    func paste() { paste(to: previous) }
-    func paste(to target: NSRunningApplication?) {
-        guard Permissions.requireAccessibility() else { return }
-        guard let app = target, !app.isTerminated, app.processIdentifier != ProcessInfo.processInfo.processIdentifier else {
-            NoticeCenter.shared.report(UserFacingError("没有可粘贴的目标应用。请先聚焦文本输入框，再用快捷键打开剪贴板。")); return
+    private func isTarget(_ app: NSRunningApplication) -> Bool {
+        guard !app.isTerminated, app.processIdentifier != ProcessInfo.processInfo.processIdentifier,
+              app.activationPolicy == .regular, !(app.bundleIdentifier?.hasPrefix("app.itools.mac") ?? false) else { return false }
+        if PermissionCenter.shared.visitingSettings { return false }
+        return true
+    }
+    @discardableResult func captureFrontmost() -> NSRunningApplication? {
+        if let front = NSWorkspace.shared.frontmostApplication, isTarget(front) { previous = front }
+        return previous.flatMap { !$0.isTerminated ? $0 : nil }
+    }
+    @discardableResult func paste(to target: NSRunningApplication? = nil, prepare: (() -> Bool)? = nil,
+                                   completion: @escaping (Bool) -> Void = { _ in }) -> Bool {
+        guard Permissions.requireEventPosting() else { completion(false); return false }
+        guard !pastePending else { NoticeCenter.shared.success("正在切换到粘贴目标，请稍候。"); completion(false); return false }
+        guard let app = target ?? captureFrontmost(), !app.isTerminated,
+              app.processIdentifier != ProcessInfo.processInfo.processIdentifier else {
+            NoticeCenter.shared.report(UserFacingError("没有可粘贴的目标应用。请先聚焦输入框，再用快捷键打开剪贴板。")); completion(false); return false
         }
         let expectedClipboard = NSPasteboard.general.changeCount
-        NSApp.hide(nil); app.activate(options: .activateIgnoringOtherApps)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
-            guard !app.isTerminated, NSWorkspace.shared.frontmostApplication?.processIdentifier == app.processIdentifier,
-                  NSPasteboard.general.changeCount == expectedClipboard else { return }
-            let source = CGEventSource(stateID: .hidSystemState)
-            let down = CGEvent(keyboardEventSource: source, virtualKey: 9, keyDown: true)
-            let up = CGEvent(keyboardEventSource: source, virtualKey: 9, keyDown: false)
-            down?.flags = .maskCommand; up?.flags = .maskCommand
-            down?.post(tap: .cghidEventTap); up?.post(tap: .cghidEventTap)
+        let deadline = ProcessInfo.processInfo.systemUptime + 2
+        pastePending = true
+        func finish(_ success: Bool, _ message: String? = nil) {
+            self.pastePending = false
+            if let message = message { NoticeCenter.shared.report(UserFacingError(message)) }
+            completion(success)
         }
+        func check() {
+            let flags = CGEventSource.flagsState(.combinedSessionState)
+            let modifiersReleased = flags.intersection([.maskCommand, .maskControl, .maskAlternate, .maskShift]).isEmpty
+            let readiness = PasteReadiness.evaluate(targetAlive: !app.isTerminated,
+                clipboardUnchanged: NSPasteboard.general.changeCount == expectedClipboard,
+                foreground: NSWorkspace.shared.frontmostApplication?.processIdentifier == app.processIdentifier,
+                modifiersReleased: modifiersReleased, timedOut: ProcessInfo.processInfo.systemUptime >= deadline)
+            switch readiness {
+            case .waiting: DispatchQueue.main.asyncAfter(deadline: .now() + 0.04, execute: check)
+            case .targetClosed: finish(false, "目标应用已退出，未发送粘贴操作。")
+            case .clipboardChanged: finish(false, "切换期间剪贴板已被更新，本次粘贴已取消，请重新选择内容。")
+            case .timedOut: finish(false, "未能切换到目标应用，或快捷键尚未松开。请聚焦输入框并松开按键后重试。")
+            case .ready:
+                guard Permissions.requireEventPosting() else { finish(false); return }
+                guard let source = CGEventSource(stateID: .privateState),
+                      let down = CGEvent(keyboardEventSource: source, virtualKey: 9, keyDown: true),
+                      let up = CGEvent(keyboardEventSource: source, virtualKey: 9, keyDown: false) else {
+                    finish(false, "未能创建粘贴按键事件，请重新打开 iTools 后再试。"); return
+                }
+                guard prepare?() ?? true else { finish(false); return }
+                down.flags = .maskCommand; up.flags = .maskCommand
+                down.post(tap: .cghidEventTap); up.post(tap: .cghidEventTap)
+                NoticeCenter.shared.success("已向「\(app.localizedName ?? "目标应用")」发送粘贴操作")
+                finish(true)
+            }
+        }
+        NSApp.hide(nil)
+        guard app.activate(options: .activateIgnoringOtherApps) else {
+            finish(false, "无法激活目标应用。请先点选目标输入框，再重新打开剪贴板。"); return false
+        }
+        DispatchQueue.main.async(execute: check)
+        return true
     }
+    deinit { if let observer = observer { NSWorkspace.shared.notificationCenter.removeObserver(observer) } }
 }
 final class HotKeyCenter {
     static let shared = HotKeyCenter()

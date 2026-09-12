@@ -7,11 +7,13 @@ import CoreImage
 
 struct FilesPage: View {
     @ObservedObject var service: FileService
+    @ObservedObject var menuPreferences: FinderMenuPreferences
     var body: some View {
         VStack(alignment: .leading, spacing: 23) {
             HStack {
                 Button { service.choose() } label: { Label("选择文件或文件夹…", systemImage: "folder") }.buttonStyle(ToolButtonStyle()).disabled(service.working)
                 Spacer()
+                FinderMenuSettingsButton(preferences: menuPreferences)
                 Button("启用访达扩展…") { FIFinderSyncController.showExtensionManagementInterface() }
                 if service.working { ProgressView().controlSize(.small) }
             }
@@ -26,7 +28,7 @@ struct FilesPage: View {
                         }
                     }
                     if service.selection.count > 12 { Text("以及另外 \(service.selection.count-12) 项").font(.system(size: 11)).foregroundColor(.secondary) }
-                }.padding(14).frame(maxWidth: .infinity, alignment: .leading).background(Color(NSColor.windowBackgroundColor)).cornerRadius(8)
+                }.padding(14).frame(maxWidth: .infinity, alignment: .leading).instrumentSurface(radius: 12)
             }
             if service.pendingFinderAction != nil {
                 HStack {
@@ -35,7 +37,7 @@ struct FilesPage: View {
                     Button("取消") { service.pendingFinderAction = nil }
                 }
             }
-            SectionBlock(title: "iTools 访达工具", detail: "访达右键菜单中的同名子菜单由 iTools 提供") {
+            SectionBlock(title: "iTools 访达工具", detail: "可将常用操作放到 Finder 一级右键菜单，其余保留在子菜单") {
                 LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], alignment: .leading, spacing: 12) {
                     ForEach(FinderActions.groups, id: \.title) { group in
                         Menu {
@@ -102,44 +104,55 @@ struct FilesPage: View {
 }
 struct MonitorPage: View {
     @ObservedObject var service: MonitorService
+    @ObservedObject var menuPreferences: MenuBarPreferences
     private var snapshot: MonitorSnapshot { service.snapshot }
     var body: some View {
-        VStack(alignment: .leading, spacing: 25) {
+        VStack(alignment: .leading, spacing: 18) {
+            MenuBarSettingsView(preferences: menuPreferences, monitor: service)
             HStack {
                 Label(service.enabled ? "正在观察这台 Mac" : "监控已暂停，显示最后一次读数", systemImage: service.enabled ? "circle.fill" : "pause.circle").font(.system(size: 12)).foregroundColor(service.enabled ? .green : .secondary)
                 Spacer(); Toggle("状态监控", isOn: $service.enabled).toggleStyle(.switch).controlSize(.small)
             }
-            HStack(spacing: 22) {
+            HStack(spacing: 16) {
                 VStack(alignment: .leading, spacing: 15) {
-                    MetricView(title: "CPU", value: snapshot.cpu.map { String(format: "%.1f%%", $0) } ?? "采样中", detail: "所有核心的平均负载")
+                    HStack {
+                        MetricView(title: "CPU", value: snapshot.cpu.map { String(format: "%.1f%%", $0) } ?? "采样中", detail: "所有核心的平均负载")
+                        InstrumentIcon(name: "cpu", size: 42)
+                    }
                     HistoryChart(values: service.cpuHistory, color: accent).frame(height: 105)
-                }
+                }.padding(20).instrumentSurface(tint: accent)
                 VStack(alignment: .leading, spacing: 15) {
-                    MetricView(title: "内存", value: String(format: "%.1f%%", snapshot.memoryPercent), detail: "\(bytes(snapshot.memoryUsed)) / \(bytes(snapshot.memoryTotal))")
-                    HistoryChart(values: service.memoryHistory, color: .teal).frame(height: 105)
-                }
+                    HStack {
+                        MetricView(title: "内存", value: String(format: "%.1f%%", snapshot.memoryPercent), detail: "\(bytes(snapshot.memoryUsed)) / \(bytes(snapshot.memoryTotal))")
+                        InstrumentIcon(name: "memorychip", color: InterfaceStyle.cyan, size: 42)
+                    }
+                    HistoryChart(values: service.memoryHistory, color: InterfaceStyle.cyan).frame(height: 105)
+                }.padding(20).instrumentSurface(tint: InterfaceStyle.cyan)
             }
             HStack { Text("最近 2 分钟").font(.system(size: 10)).foregroundColor(.secondary); Spacer(); Text("每 2 秒采样，传感器每 10 秒读取").font(.system(size: 10)).foregroundColor(.secondary) }
-            Divider()
-            HStack(spacing: 25) {
-                MetricView(title: "GPU 使用率", value: MetricFormatting.percent(snapshot.gpu),
-                           detail: snapshot.gpuDevices.isEmpty ? "当前驱动未提供读数" : snapshot.gpuDevices.joined(separator: " / "))
-                HistoryChart(values: service.gpuHistory, color: .purple).frame(width: 250, height: 60)
+            VStack(alignment: .leading, spacing: 14) {
+                HStack(spacing: 25) {
+                    InstrumentIcon(name: "rectangle.3.offgrid", color: InterfaceStyle.violet, size: 42)
+                    MetricView(title: "GPU 使用率", value: MetricFormatting.percent(snapshot.gpu),
+                               detail: snapshot.gpuDevices.isEmpty ? "当前驱动未提供读数" : snapshot.gpuDevices.joined(separator: " / "))
+                    HistoryChart(values: service.gpuHistory, color: InterfaceStyle.violet).frame(width: 200, height: 65)
+                }
+                Text("多显卡的菜单栏读数取当前最高使用率；不支持的驱动显示「—」。").font(.system(size: 11)).foregroundColor(.secondary)
+            }.padding(20).instrumentSurface(tint: InterfaceStyle.violet)
+            SectionBlock(title: "硬件与存储") {
+                HStack(spacing: 25) {
+                    MetricView(title: "CPU 温度", value: snapshot.cpuTemperature.map { String(format: "%.1f°C", $0) } ?? "不可用", detail: "Intel SMC · 只读")
+                    MetricView(title: "风扇", value: snapshot.fan.map { String(format: "%.0f", $0) } ?? "不可用", detail: "RPM" + (snapshot.fan2.map { String(format: " · 第二风扇 %.0f", $0) } ?? ""))
+                    MetricView(title: "磁盘可用", value: bytes(snapshot.diskFree), detail: "总容量 " + bytes(snapshot.diskTotal))
+                }
             }
-            Text("多显卡的菜单栏读数取当前最高使用率；不支持的驱动显示「—」。").font(.system(size: 11)).foregroundColor(.secondary)
-            Divider()
-            HStack(spacing: 25) {
-                MetricView(title: "CPU 温度", value: snapshot.cpuTemperature.map { String(format: "%.1f°C", $0) } ?? "不可用", detail: "Intel SMC · 只读")
-                MetricView(title: "风扇", value: snapshot.fan.map { String(format: "%.0f", $0) } ?? "不可用", detail: "RPM" + (snapshot.fan2.map { String(format: " · 第二风扇 %.0f", $0) } ?? ""))
-                MetricView(title: "磁盘可用", value: bytes(snapshot.diskFree), detail: "总容量 " + bytes(snapshot.diskTotal))
+            SectionBlock(title: "网络与交换空间") {
+                HStack(spacing: 25) {
+                    MetricView(title: "下载速率", value: bytes(UInt64(max(0, snapshot.download))) + "/s", detail: "物理网络接口汇总")
+                    MetricView(title: "上传速率", value: bytes(UInt64(max(0, snapshot.upload))) + "/s", detail: "排除回环与 VPN 重复计数")
+                    MetricView(title: "交换空间", value: bytes(snapshot.swap), detail: "系统实际使用")
+                }
             }
-            Divider()
-            HStack(spacing: 25) {
-                MetricView(title: "下载速率", value: bytes(UInt64(max(0, snapshot.download))) + "/s", detail: "物理网络接口汇总")
-                MetricView(title: "上传速率", value: bytes(UInt64(max(0, snapshot.upload))) + "/s", detail: "排除回环与 VPN 重复计数")
-                MetricView(title: "交换空间", value: bytes(snapshot.swap), detail: "系统实际使用")
-            }
-            Divider()
             SectionBlock(title: "电池与运行时间") {
                 HStack(spacing: 25) {
                     MetricView(title: snapshot.charging ? "电池 · 正在充电" : "电池电量", value: snapshot.battery.map { String(format: "%.0f%%", $0) } ?? "无电池", detail: snapshot.batteryTemperature.map { String(format: "温度 %.1f°C", $0) } ?? "温度不可用")
@@ -158,16 +171,27 @@ struct HistoryChart: View {
     let color: Color
     var body: some View {
         GeometryReader { proxy in
+            let samples = Array(values.suffix(60))
+            let points = samples.enumerated().map { index, value in
+                CGPoint(x: Double(60 - samples.count + index) / 59 * proxy.size.width,
+                        y: (1 - min(100, max(0, value.isFinite ? value : 0)) / 100) * proxy.size.height)
+            }
             ZStack {
                 Path { p in
-                    for level in [0.0, 0.5, 1.0] { let y = proxy.size.height*level; p.move(to: CGPoint(x: 0,y: y)); p.addLine(to: CGPoint(x: proxy.size.width,y: y)) }
-                }.stroke(Color.secondary.opacity(0.16), lineWidth: 1)
-                Path { p in
-                    for (index, value) in values.enumerated() {
-                        let point = CGPoint(x: Double(index)/59*proxy.size.width, y: (1-min(100,max(0,value))/100)*proxy.size.height)
-                        if index == 0 { p.move(to: point) } else { p.addLine(to: point) }
+                    for level in [0.0, 0.5, 1.0] {
+                        let y = proxy.size.height * level
+                        p.move(to: CGPoint(x: 0, y: y)); p.addLine(to: CGPoint(x: proxy.size.width, y: y))
                     }
-                }.stroke(color, style: StrokeStyle(lineWidth: 2, lineJoin: .round))
+                }.stroke(InterfaceStyle.border.opacity(0.65), style: StrokeStyle(lineWidth: 0.6, dash: [3, 4]))
+                if let first = points.first, let last = points.last {
+                    Path { p in
+                        p.move(to: CGPoint(x: first.x, y: proxy.size.height))
+                        for point in points { p.addLine(to: point) }
+                        p.addLine(to: CGPoint(x: last.x, y: proxy.size.height)); p.closeSubpath()
+                    }.fill(LinearGradient(colors: [color.opacity(0.25), color.opacity(0.025)], startPoint: .top, endPoint: .bottom))
+                    Path { p in p.addLines(points) }.stroke(color, style: StrokeStyle(lineWidth: 1.8, lineCap: .round, lineJoin: .round))
+                    Circle().fill(color).frame(width: 4, height: 4).position(last)
+                }
             }
         }.accessibilityLabel("最近两分钟使用率曲线")
     }
@@ -185,12 +209,13 @@ struct UtilitiesPage: View {
         VStack(alignment: .leading, spacing: 26) {
             SectionBlock(title: "窗口布局", detail: "作用于打开 iTools 之前的应用窗口") {
                 LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
-                    ForEach(WindowLayout.allCases) { layout in Button(layout.title) { model.windows.apply(layout) }.frame(maxWidth: .infinity) }
-                    Button("还原上一步") { model.windows.restore() }
+                    ForEach(WindowLayout.allCases) { layout in
+                        WindowLayoutButton(layout: layout) { model.windows.apply(layout) }
+                    }
+                    WindowLayoutButton(layout: nil) { model.windows.restore() }
                 }
-                HStack { Text("窗口工具需要辅助功能权限。").font(.system(size: 11)).foregroundColor(.secondary); Button("查看 / 设置窗口快捷键") { model.showShortcutSettings?() } }
+                HStack { Text("窗口工具需要辅助功能权限。").font(.system(size: 11)).foregroundColor(.secondary); Button("查看 / 设置窗口快捷键") { model.showShortcutSettings?(.windows) } }
             }
-            Divider()
             SectionBlock(title: "保持唤醒", detail: awake.active ? "运行中" : "未开启") {
                 HStack {
                     Picker("时长", selection: $minutes) { Text("30 分钟").tag(30); Text("1 小时").tag(60); Text("2 小时").tag(120); Text("直到关闭").tag(0) }.frame(width: 180)
@@ -201,7 +226,6 @@ struct UtilitiesPage: View {
                 if let until = awake.until { Text("结束时间：\(until.formatted(date: .omitted, time: .shortened))").font(.system(size: 11)).foregroundColor(.secondary) }
                 Text("保持系统处于唤醒状态；合盖、关机或主动睡眠仍由 macOS 决定。").font(.system(size: 11)).foregroundColor(.secondary)
             }
-            Divider()
             SectionBlock(title: "临时便笺", detail: "自动保存到本机") {
                 TextEditor(text: $note).font(.system(size: 13)).frame(height: 135).border(Color.secondary.opacity(0.2))
                 HStack {
@@ -239,64 +263,36 @@ struct UtilitiesPage: View {
         }
     }
 }
-struct CompanionsPage: View {
-    @ObservedObject var registry: CompanionRegistry
-    var body: some View {
-        VStack(alignment: .leading, spacing: 22) {
-            InfoRow(icon: "link", title: "连接已有应用", detail: "这些应用已有 Intel 版本。选择本机安装位置后，可从这里打开原应用；图片工具还可以接收文件。商业应用的许可、订阅及系统要求由原厂决定。")
-            HStack { Spacer(); Button("重新检测") { registry.refresh() } }
-            ForEach(registry.apps) { app in
-                VStack(alignment: .leading, spacing: 12) {
-                    HStack(spacing: 12) {
-                        if let url = registry.locations[app.id] { Image(nsImage: NSWorkspace.shared.icon(forFile: url.path)).resizable().frame(width: 40, height: 40) }
-                        else { Image(systemName: "app.dashed").font(.system(size: 30)).foregroundColor(.secondary).frame(width: 40) }
-                        VStack(alignment: .leading, spacing: 5) {
-                            Text(app.name).font(.system(size: 18, weight: .semibold))
-                            Text(app.detail).font(.system(size: 12)).foregroundColor(.secondary)
-                        }
-                        Spacer()
-                        Text(registry.locations[app.id] == nil ? "未连接" : "已连接").font(.system(size: 11)).foregroundColor(registry.locations[app.id] == nil ? .secondary : .green)
-                    }
-                    if let url = registry.locations[app.id] { Text(url.path).font(.system(size: 10)).foregroundColor(.secondary).lineLimit(1).truncationMode(.middle) }
-                    HStack {
-                        Button("打开 " + app.name) { registry.open(app) }.disabled(registry.locations[app.id] == nil)
-                        Button("选择应用…") { registry.connect(app) }
-                        if app.id == "ishot" {
-                            Button("发送图片…") { let files = Panels.chooseFiles(types: ["png", "jpg", "jpeg"]); if !files.isEmpty { registry.open(app, files: files) } }.disabled(registry.locations[app.id] == nil)
-                        }
-                        Spacer(); Link("官方网站", destination: URL(string: app.website)!)
-                    }
-                }.padding(18).background(Color(NSColor.windowBackgroundColor)).cornerRadius(9)
-            }
-            Text("此页面是原应用启动与文件交接入口。iTools 并未将这些商业应用嵌入自身进程，也不提供破解、授权替代或自动执行其私有功能。")
-                .font(.system(size: 11)).foregroundColor(.secondary)
-        }
-    }
-}
 struct SettingsPage: View {
     @ObservedObject var model: AppModel
     @ObservedObject var clipboard: ClipboardService
     @ObservedObject var monitor: MonitorService
     @State private var permissionRefresh = 0
+    @ObservedObject private var permissions = PermissionCenter.shared
     @AppStorage("appearance") private var appearance = "system"
     var body: some View {
         VStack(alignment: .leading, spacing: 25) {
-            SectionBlock(title: "全局快捷键与操作指南", detail: "在其他应用中也可呼出") {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 330), spacing: 24)], alignment: .leading, spacing: 24) {
+            LoginItemSettingsView(controller: model.loginItem, minimumHeight: 205)
+            SectionBlock(title: "快捷键与操作指南", detail: "分类查看、直接编辑；在其他应用中也可呼出", minimumHeight: 205) {
                 HStack {
-                    Button("设置所有功能的快捷键…") { model.showShortcutSettings?() }
-                    Button("查看快捷键操作指南") { model.showGuide?() }
+                    Button("打开快捷键与操作指南…") { model.showShortcutSettings?(nil) }
                     Spacer()
                 }
                 Text("常用操作已预设按键，其余功能可按需分配。重复或无法注册的组合会提示；修改立即保存。").font(.system(size: 12)).foregroundColor(.secondary)
             }
+            }
             ClipboardPanelSettingsView(preferences: model.clipboardPanel, open: { model.showClipboard?(false) })
-            Divider()
+            SectionBlock(title: "Finder 右键菜单", detail: "勾选常用操作显示在一级，其他操作保留在 iTools 子菜单") {
+                HStack {
+                    FinderMenuSettingsButton(preferences: model.finderMenu)
+                    Spacer()
+                    FinderMenuSelectionSummary(preferences: model.finderMenu)
+                }
+            }
             SectionBlock(title: "顶部快捷面板", detail: "点击工具箱或指标打开，右键保留文字菜单") {
                 DisclosureGroup("自定义快捷入口与排序") { QuickPanelSettingsView(preferences: model.quickPanel).padding(.top, 12) }
             }
-            Divider()
-            MenuBarSettingsView(preferences: model.menuBar, monitor: monitor)
-            Divider()
             SectionBlock(title: "功能模块") {
                 Toggle("截图与录制", isOn: $model.captureEnabled).disabled(model.recorder.isActive || model.capture.busy)
                 Toggle("剪贴板历史", isOn: $clipboard.enabled)
@@ -304,15 +300,15 @@ struct SettingsPage: View {
                 Toggle("系统状态监控", isOn: $monitor.enabled)
                 Text("关闭剪贴板或监控会停止其采样计时器。截图和文件工具只在执行操作时工作。").font(.system(size: 11)).foregroundColor(.secondary)
             }
-            Divider()
             SectionBlock(title: "系统权限") {
-                PermissionRow(title: "屏幕录制", detail: "用于截图、屏幕文字识别和录屏", allowed: Permissions.screen) { Permissions.open("Privacy_ScreenCapture") }
-                PermissionRow(title: "辅助功能", detail: "用于窗口布局、粘贴、锁屏及清洁模式", allowed: Permissions.accessibility) { Permissions.open("Privacy_Accessibility") }
-                PermissionRow(title: "麦克风", detail: "仅在选择录音时请求", allowed: AVCaptureDevice.authorizationStatus(for: .audio) == .authorized) { Permissions.open("Privacy_Microphone") }
+                PermissionRow(title: "屏幕录制", detail: "用于截图、屏幕文字识别和录屏；部分变更需重新打开应用", allowed: permissions.screen) { permissions.show(.screen) }
+                PermissionRow(title: "辅助功能", detail: "窗口控制；状态来自当前运行的 iTools", allowed: permissions.accessibility) { permissions.show(.accessibility) }
+                PermissionRow(title: "粘贴与模拟按键", detail: "等待目标应用就绪后发送按键，与辅助功能一起检查", allowed: permissions.accessibility && permissions.eventPosting) { permissions.show(.accessibility, operation: "直接粘贴") }
+                PermissionRow(title: "麦克风", detail: "仅在选择录音时请求", allowed: permissions.microphone == .authorized) { permissions.show(.microphone) }
+                HStack { Text("自动化").font(.system(size: 13, weight: .medium)); Text("切换外观、Dock 或 Finder 操作时分别申请").font(.system(size: 11)).foregroundColor(.secondary); Spacer(); Button("查看授权说明") { permissions.show(.automation) } }
                 PermissionRow(title: "访达扩展", detail: "将 iTools 操作加入访达右键菜单", allowed: FIFinderSyncController.isExtensionEnabled) { FIFinderSyncController.showExtensionManagementInterface() }
-                Button("刷新权限状态") { permissionRefresh += 1 }
-            }.id(permissionRefresh)
-            Divider()
+                Button("刷新权限状态") { permissions.refresh(); permissionRefresh += 1 }
+            }.id(permissionRefresh).onAppear { permissions.refresh() }
             SectionBlock(title: "剪贴板保留规则") {
                 HStack {
                     Picker("最多保存", selection: $clipboard.maxCount) { Text("100 项").tag(100); Text("300 项").tag(300); Text("1000 项").tag(1000) }.frame(width: 220)
@@ -332,7 +328,6 @@ struct SettingsPage: View {
                 }
                 Text("数据保存在 ~/Library/Application Support/ITools。历史文件为本地 JSON，未额外加密；导出备份也可能含私人内容。").font(.system(size: 11)).foregroundColor(.secondary)
             }
-            Divider()
             SectionBlock(title: "外观") {
                 Picker("主题", selection: $appearance) { Text("跟随系统").tag("system"); Text("浅色").tag("light"); Text("深色").tag("dark") }
                     .pickerStyle(.segmented).frame(width: 330)

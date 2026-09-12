@@ -1,9 +1,12 @@
-// Integration through real Launch Services. File mutations use a fresh fixture
-// directory. Finder reveal, app launches, and recycle use scoped test hooks.
+// Integration through real Launch Services. File mutations use fresh fixtures.
+// Sandbox mode first checks unmodified production cold/warm TXT + Finder reveal.
+// The 29-request session then uses scoped reveal/app/recycle hooks and a private clipboard.
 import AppKit
+import Carbon
 
 let args = CommandLine.arguments
-guard args.count == 3 else { fatalError("Usage: test-finder-direct.swift /path/iTools.app /path/new-output") }
+guard (3...4).contains(args.count) else { fatalError("Usage: test-finder-direct.swift /path/iTools.app /path/new-output [sandbox-sender-executable]") }
+let sandboxSender = args.count == 4 ? URL(fileURLWithPath: args[3]) : nil
 let host = URL(fileURLWithPath: args[1])
 let worker = host.appendingPathComponent("Contents/Helpers/iTools Finder Actions.app")
 let output = URL(fileURLWithPath: args[2], isDirectory: true)
@@ -34,13 +37,36 @@ func requestURL(_ action: String, _ paths: [URL], id: UUID = UUID(), application
     return c.url!
 }
 func deliver(_ urls: [URL]) {
+    if let sender = sandboxSender {
+        let process = Process(); process.executableURL = sender
+        process.arguments = [worker.path, output.path] + urls.map(\.absoluteString)
+        let pipe = Pipe(); process.standardOutput = pipe
+        do { try process.run() } catch { finish("FAIL: sandbox sender: \(error)", 2) }
+        let data = pipe.fileHandleForReading.readDataToEndOfFile(); process.waitUntilExit()
+        guard process.terminationStatus == 0,
+              let result = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              result["sandboxDeniedWrite"] as? Bool == true,
+              let pid = result["pid"] as? Int32, pid != 0,
+              let app = NSRunningApplication(processIdentifier: pid) else {
+            finish("FAIL: sandbox delivery: " + String(decoding: data, as: UTF8.self), 2)
+        }
+        launched = app
+        return
+    }
     let config = NSWorkspace.OpenConfiguration(); config.activates = false; config.addsToRecentItems = false
+    config.promptsUserIfNeeded = false; config.allowsRunningApplicationSubstitution = false
+    let event = NSAppleEventDescriptor(eventClass: AEEventClass(kCoreEventClass), eventID: AEEventID(kAEOpenApplication),
+        targetDescriptor: nil, returnID: AEReturnID(kAutoGenerateReturnID), transactionID: AETransactionID(kAnyTransactionID))
+    let list = NSAppleEventDescriptor.list()
+    for (index, url) in urls.enumerated() { list.insert(NSAppleEventDescriptor(string: url.absoluteString), at: index + 1) }
+    event.setParam(list, forKeyword: AEKeyword(0x69547271))
+    config.appleEvent = event
     if launched == nil {
         config.arguments = ["--finder-direct-test"]
         config.environment = ["ITOOLS_FINDER_TEST_OUTPUT": output.path]
     }
     var done = false; var failure: Error?
-    NSWorkspace.shared.open(urls, withApplicationAt: worker, configuration: config) { app, error in
+    NSWorkspace.shared.openApplication(at: worker, configuration: config) { app, error in
         DispatchQueue.main.async { launched = app ?? launched; failure = error; done = true }
     }
     let deadline = Date().addingTimeInterval(20)
@@ -80,6 +106,52 @@ let directory = output.appendingPathComponent("中文 空格 &action=delete #?",
 let destination = output.appendingPathComponent("paste destination", isDirectory: true)
 try fm.createDirectory(at: directory, withIntermediateDirectories: true)
 try fm.createDirectory(at: destination, withIntermediateDirectories: true)
+if sandboxSender != nil {
+    // Launch Services strips sandbox callers' launch arguments and environment.
+    // Test a real production cold start first, without any worker test hooks.
+    let coldDirectory = output.appendingPathComponent("cold startup 中文 & #", isDirectory: true)
+    try fm.createDirectory(at: coldDirectory, withIntermediateDirectories: true)
+    deliver([requestURL("new-txt", [coldDirectory])])
+    let coldFile = coldDirectory.appendingPathComponent("未命名.txt")
+    let deadline = Date().addingTimeInterval(20)
+    while !fm.fileExists(atPath: coldFile.path) && Date() < deadline { pump(0.05) }
+    check(fm.fileExists(atPath: coldFile.path), "sandbox production cold start did not create TXT")
+    check(try Data(contentsOf: coldFile).isEmpty, "cold TXT is not an empty file")
+    check(Set(NSRunningApplication.runningApplications(withBundleIdentifier: "app.itools.mac").map(\.processIdentifier)) == originalMainPIDs,
+          "sandbox cold start launched the main app")
+    check(launched?.isActive == false, "sandbox cold start activated worker")
+    // A second fresh menu click proves a running production worker receives oapp
+    // as well, and that new files do not replace an existing file.
+    try "preserve cold original".write(to: coldFile, atomically: true, encoding: .utf8)
+    deliver([requestURL("new-txt", [coldDirectory])])
+    let second = coldDirectory.appendingPathComponent("未命名 2.txt")
+    let warmDeadline = Date().addingTimeInterval(20)
+    while !fm.fileExists(atPath: second.path) && Date() < warmDeadline { pump(0.05) }
+    let preserved = try String(contentsOf: coldFile)
+    check(fm.fileExists(atPath: second.path) && preserved == "preserve cold original", "production warm request lost or overwrote original")
+    print("PASS: sandbox production cold/warm TXT, actual files and Finder reveal, main app unchanged")
+    pump(0.5)
+    check(launched?.terminate() == true, "production worker refused graceful test exit")
+    let quitDeadline = Date().addingTimeInterval(8)
+    while launched?.isTerminated == false && Date() < quitDeadline { pump(0.05) }
+    check(launched?.isTerminated == true, "production worker still busy; not force-quitting")
+    launched = nil
+
+    // Start the isolated test session from this ordinary harness, then send all
+    // action requests from the sandbox. This keeps real Clipboard/Trash untouched.
+    let config = NSWorkspace.OpenConfiguration()
+    config.activates = false; config.addsToRecentItems = false; config.promptsUserIfNeeded = false
+    config.allowsRunningApplicationSubstitution = false
+    config.arguments = ["--finder-direct-test"]
+    config.environment = ["ITOOLS_FINDER_TEST_OUTPUT": output.path]
+    var ready = false; var failure: Error?
+    NSWorkspace.shared.openApplication(at: worker, configuration: config) { app, error in
+        DispatchQueue.main.async { launched = app; failure = error; ready = true }
+    }
+    let startDeadline = Date().addingTimeInterval(20)
+    while !ready && Date() < startDeadline { pump(0.05) }
+    check(ready && launched != nil && failure == nil, "test session launch failed: \(String(describing: failure))")
+}
 let plain = directory.appendingPathComponent("未命名.txt")
 let first = run("new-txt", [directory])
 check(fm.fileExists(atPath: plain.path) && (first["dialogs"] as? [String]) == [], "TXT did not execute directly")
@@ -132,4 +204,4 @@ let before = try fm.contentsOfDirectory(atPath: destination.path)
 deliver([requestURL("new-txt", [destination], id: c)]); pump(0.5)
 check(try fm.contentsOfDirectory(atPath: destination.path) == before, "duplicate delivery executed twice")
 check(NSWorkspace.shared.urlForApplication(toOpen: requestURL("new-txt", [directory])) == nil, "internal scheme registered globally")
-finish("PASS: \(count) direct actions; cold/warm/queued/idempotent delivery; real fixture mutations; no main app or windows; app/Terminal URLs and recycle callbacks verified through isolated hooks; public internal-scheme lookup has no handler", 0)
+finish("PASS: \(count) direct actions; sender=\(sandboxSender == nil ? "ordinary" : "sandboxed (write denial checked)"); cold/warm/queued/idempotent delivery; real fixture mutations; no main app or windows; app/Terminal URLs and recycle callbacks verified through isolated hooks; public internal-scheme lookup has no handler", 0)

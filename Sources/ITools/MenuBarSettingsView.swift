@@ -35,7 +35,7 @@ struct MenuBarSettingsView: View {
                         }.frame(minWidth: 36).help(reading.tooltip)
                     }
                     Spacer(minLength: 0)
-                }.padding(12).background(Color(NSColor.windowBackgroundColor)).cornerRadius(7)
+                }.padding(12).background(InterfaceStyle.raised.opacity(0.48)).cornerRadius(9)
             }
             if !monitor.enabled {
                 HStack {

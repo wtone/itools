@@ -70,6 +70,9 @@ final class ClipboardService: ObservableObject {
         entries = policy.adding(entry, to: entries); persist()
     }
     @discardableResult func copy(_ entry: ClipEntry, plain: Bool = false, paste: Bool = false, to pb: NSPasteboard = .general) -> Bool {
+        if paste && pb.name == NSPasteboard.general.name {
+            return AppFocus.shared.paste(prepare: { self.copy(entry, plain: plain) })
+        }
         pb.clearContents()
         let success: Bool
         if plain && entry.kind == .text { success = pb.setString(entry.text, forType: .string) }
@@ -86,8 +89,7 @@ final class ClipboardService: ObservableObject {
         guard success else { NoticeCenter.shared.report(UserFacingError("未能写入剪贴板，请重新复制原始内容。")); return false }
         guard pb.name == NSPasteboard.general.name else { return true }
         changeCount = pb.changeCount
-        if paste { AppFocus.shared.paste() }
-        else { NoticeCenter.shared.success("已复制到剪贴板") }
+        NoticeCenter.shared.success("已复制到剪贴板")
         return true
     }
     func pin(_ entry: ClipEntry) {
@@ -108,8 +110,11 @@ final class ClipboardService: ObservableObject {
     }
     func enqueue(_ entry: ClipEntry) { stack.append(entry); stackCount = stack.count; NoticeCenter.shared.success("已加入连续粘贴队列") }
     func pasteNext() {
-        guard !stack.isEmpty, Permissions.requireAccessibility() else { return }
-        copy(stack.removeFirst(), paste: true); stackCount = stack.count
+        guard let entry = stack.first else { NoticeCenter.shared.success("连续粘贴队列为空"); return }
+        AppFocus.shared.paste(prepare: { self.copy(entry) }) { submitted in
+            guard submitted, self.stack.first?.id == entry.id else { return }
+            self.stack.removeFirst(); self.stackCount = self.stack.count
+        }
     }
     func saveSettings() {
         UserDefaults.standard.set(maxCount, forKey: "clipboard.maxCount")
@@ -128,10 +133,14 @@ final class ClipboardService: ObservableObject {
         NoticeCenter.shared.perform { try Storage.save(snippets, "snippets.json") }
     }
     func removeSnippet(_ id: UUID) { snippets.removeAll { $0.id == id }; NoticeCenter.shared.perform { try Storage.save(snippets, "snippets.json") } }
-    func useSnippet(_ snippet: Snippet, paste: Bool) {
+    @discardableResult func useSnippet(_ snippet: Snippet, paste: Bool) -> Bool {
         let expanded = snippet.expanded(clipboard: NSPasteboard.general.string(forType: .string) ?? "")
-        copyText(expanded); changeCount = NSPasteboard.general.changeCount
-        if paste { AppFocus.shared.paste() } else { NoticeCenter.shared.success("已复制短语") }
+        let prepare = {
+            guard copyText(expanded) else { NoticeCenter.shared.report(UserFacingError("未能复制短语，请重试。")); return false }
+            self.changeCount = NSPasteboard.general.changeCount; return true
+        }
+        if paste { return AppFocus.shared.paste(prepare: prepare) }
+        let copied = prepare(); if copied { NoticeCenter.shared.success("已复制短语") }; return copied
     }
     func exportHistory() {
         guard let url = Panels.save(name: "iTools-剪贴板.json", types: ["json"]) else { return }

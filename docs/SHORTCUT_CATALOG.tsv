@@ -1,8 +1,8 @@
-常用面板	快捷键操作指南	⌥⌘/	app.guide
+常用面板	快捷键与操作指南	⌥⌘/	app.guide
 快捷操作	剪贴板历史面板	⌥⌘V	quick.clipboard
 剪贴板	快捷短语面板	⌥⇧⌘V	clipboard.snippets
 常用面板	顶部工具面板	⌃⌥Space	app.toolbox
-常用面板	快捷键设置	未设置	app.shortcuts
+常用面板	快捷键面板（备用）	未设置	app.shortcuts
 快捷操作	区域截图	⌥⇧4	quick.screenshot
 快捷操作	屏幕文字识别	⌥⇧T	quick.ocr
 剪贴板	粘贴队列下一项	⌥⌘B	clipboard.next
@@ -60,7 +60,6 @@
 功能页面	打开访达与文件	未设置	page.访达与文件
 功能页面	打开系统状态	未设置	page.系统状态
 功能页面	打开窗口与效率	未设置	page.窗口与效率
-功能页面	打开应用集成	未设置	page.应用集成
 功能页面	打开设置	未设置	page.设置
 窗口布局	左上角	未设置	window.topLeft
 窗口布局	右上角	未设置	window.topRight
@@ -130,15 +129,11 @@
 文件 · 压缩与加密	压缩为 ZIP	未设置	file.zip
 文件 · 压缩与加密	压缩为 ZIP 并移到废纸篓	未设置	file.zip-trash
 文件 · 压缩与加密	加密压缩为 7z…	未设置	file.encrypt-7z
-文件 · 压缩与加密	加密压缩为 ZIP	未设置	file.encrypt-zip
+文件 · 压缩与加密	加密压缩为 ZIP…	未设置	file.encrypt-zip
 文件 · 压缩与加密	自定义压缩…	未设置	file.archive
 文件 · 压缩与加密	设置加密密码…	未设置	file.password
 文件 · 压缩与加密	校验压缩包…	未设置	file.archive-test
 文件 · 压缩与加密	用 FastZip 打开	未设置	file.fastzip
-应用集成	打开 iShot	未设置	companion.ishot
-应用集成	打开 iRightMouse	未设置	companion.irightmouse
-应用集成	打开 iCopy	未设置	companion.icopy
-应用集成	打开 State	未设置	companion.state
 剪贴板	复制当前历史项	未设置	clipSelection.copy
 剪贴板	粘贴当前历史项	未设置	clipSelection.paste
 剪贴板	纯文本复制当前历史项	未设置	clipSelection.plainCopy

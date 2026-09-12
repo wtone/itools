@@ -16,14 +16,40 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var menuActions: [Int: () -> Void] = [:]
     private var readyForOpenRequests = false
     private var queuedOpenURLs: [URL] = []
+    private var launchedAtLogin = false
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        NSAppleEventManager.shared().setEventHandler(self, andSelector: #selector(openApplication(_:reply:)),
+            forEventClass: AEEventClass(kCoreEventClass), andEventID: AEEventID(kAEOpenApplication))
+    }
+    @objc private func openApplication(_ event: NSAppleEventDescriptor, reply: NSAppleEventDescriptor) {
+        if !readyForOpenRequests { launchedAtLogin = LoginLaunch.isLoginEvent(event) }
+        else if !LoginLaunch.isLoginEvent(event) { showWindow() }
+        if readyForOpenRequests { writeLoginTestReceipt() }
+    }
     func applicationDidFinishLaunching(_ notification: Notification) {
         let smoke = ProcessInfo.processInfo.arguments.contains("--smoke-test")
-        NSApp.setActivationPolicy(.regular)
+        if ProcessInfo.processInfo.arguments.contains("--permission-check") {
+            NSApp.setActivationPolicy(.accessory)
+            let status = PermissionCenter.shared; status.refresh()
+            let report: [String: Any] = ["application": Bundle.main.bundleURL.path,
+                "version": Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "",
+                "accessibility": status.accessibility, "eventPosting": status.eventPosting,
+                "screen": status.screen, "microphone": status.microphone.rawValue]
+            if let data = try? JSONSerialization.data(withJSONObject: report, options: [.sortedKeys]),
+               let text = String(data: data, encoding: .utf8) { print(text) }
+            NSApp.terminate(nil); return
+        }
+        // Remember the source app before showing any iTools window or requesting access.
+        AppFocus.shared.captureFrontmost()
+        NSApp.setActivationPolicy(launchedAtLogin && !smoke ? .accessory : .regular)
         let appearance = UserDefaults.standard.string(forKey: "appearance") ?? "system"
         NSApp.appearance = appearance == "system" ? nil : NSAppearance(named: appearance == "dark" ? .darkAqua : .aqua)
-        window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1100, height: 790), styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
+        window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1100, height: 790), styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView], backing: .buffered, defer: false)
         window.title = "iTools"; window.minSize = NSSize(width: 990, height: 730)
-        window.titlebarAppearsTransparent = true; window.isReleasedWhenClosed = false
+        window.titleVisibility = .hidden; window.titlebarAppearsTransparent = true
+        window.titlebarSeparatorStyle = .none
+        window.isOpaque = false; window.backgroundColor = .clear
+        window.isReleasedWhenClosed = false
         window.contentView = NSHostingView(rootView: RootView(model: model))
         window.center()
         if !smoke { window.setFrameAutosaveName("IToolsMainWindow") }
@@ -31,37 +57,89 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         quickPanelController = QuickPanelController(model: model)
         clipboardPanelController = ClipboardPanelController(model: model)
         shortcutGuideController = ShortcutGuideController(model: model)
+        PermissionCenter.shared.preparePresentation = { [weak self] in
+            self?.quickPanelController?.close(); self?.clipboardPanelController?.close(); self?.shortcutGuideController?.close(returnFocus: false)
+        }
+        PermissionCenter.shared.relaunch = { [weak self] in self?.relaunchForPermissions() }
         model.showClipboard = { [weak self] snippets in
             self?.quickPanelController?.close(); self?.shortcutGuideController?.close()
             self?.clipboardPanelController?.toggle(snippets: snippets)
         }
         model.showGuide = { [weak self] in
             self?.quickPanelController?.close(); self?.clipboardPanelController?.close()
-            self?.shortcutGuideController?.show()
+            self?.shortcutGuideController?.show(toggle: true)
         }
         model.clipboardSelectionAction = { [weak self] action in self?.clipboardPanelController?.performSelection(action) }
-        model.showShortcutSettings = { [weak self] in
+        model.showShortcutSettings = { [weak self] category in
             self?.quickPanelController?.close(); self?.clipboardPanelController?.close()
-            self?.shortcutGuideController?.show(settings: true)
+            self?.shortcutGuideController?.show(category: category)
         }
         model.showToolbox = { [weak self] in
             guard let self = self, let button = self.status.button else { return }
             self.clipboardPanelController?.close(); self.shortcutGuideController?.close()
-            self.quickPanelController?.toggle(relativeTo: button)
+            self.quickPanelController?.toggle(relativeTo: button, fromClick: false)
         }
         model.performQuickAction = { [weak self] in self?.quickPanelController?.perform($0) }
         model.shortcuts.run = { [weak self] id in self?.model.performCommand(id) }
         setupMainMenu(); setupStatusMenu()
         menuBarMonitor = MenuBarMonitor(monitor: model.monitor, preferences: model.menuBar) { [weak self] button in self?.quickPanelController?.toggle(relativeTo: button) }
-        showWindow()
+        if !launchedAtLogin || smoke { showWindow() }
         readyForOpenRequests = true
         let queued = queuedOpenURLs; queuedOpenURLs.removeAll()
         if !queued.isEmpty { application(NSApp, open: queued) }
-        if smoke { runSmokeTest(); return }
+        if smoke {
+            if ProcessInfo.processInfo.arguments.contains("--clipboard-focus-test") {
+                // Run the panel's real responder checks after the launch transaction settles.
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
+                    ShortcutSmokeChecks.verifyClipboardSearch(model: self.model) { error in
+                        if let error = error { print("FAIL: \(error.localizedDescription)"); exit(17) }
+                        NSApp.terminate(nil)
+                    }
+                }
+                return
+            }
+            if ProcessInfo.processInfo.arguments.contains("--quick-panel-screen-test") {
+                let destination = URL(fileURLWithPath: ProcessInfo.processInfo.environment["ITOOLS_SMOKE_OUTPUT"] ?? NSTemporaryDirectory() + "itools-screen-test")
+                try? FileManager.default.createDirectory(at: destination, withIntermediateDirectories: true)
+                for metric in MenuBarMetric.allCases { model.menuBar.set(metric, enabled: true) }
+                model.monitor.start()
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
+                    self.quickPanelController?.verifyScreenStability(destination: destination) { error in
+                        if let error = error { print("FAIL: \(error.localizedDescription)"); exit(16) }
+                        self.runSmokeTest()
+                    }
+                }
+            } else { runSmokeTest() }
+            return
+        }
+        if ProcessInfo.processInfo.arguments.contains("--login-item-test") {
+            writeLoginTestReceipt()
+            if ProcessInfo.processInfo.environment["ITOOLS_LOGIN_TEST_MODE"] == "registration",
+               let directory = ProcessInfo.processInfo.environment["ITOOLS_LOGIN_TEST_OUTPUT"] {
+                LoginItemSmokeChecks.registration(controller: model.loginItem, destination: URL(fileURLWithPath: directory))
+            }
+            return
+        }
         if ProcessInfo.processInfo.arguments.contains("--finder-launch-test") { return }
         model.start(); registerShortcuts()
+        if ProcessInfo.processInfo.arguments.contains("--permission-help") {
+            PermissionCenter.shared.show(.accessibility, operation: "直接粘贴")
+        }
     }
-    func showWindow() { window.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true) }
+    func showWindow() {
+        NSApp.setActivationPolicy(.regular)
+        window.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true)
+        if let permission = PermissionCenter.shared.windowForChecks, permission.isVisible { permission.makeKeyAndOrderFront(nil) }
+    }
+    private func relaunchForPermissions() {
+        guard !model.recorder.isActive, !model.recorder.converting, !model.capture.busy, !model.files.working else {
+            PermissionCenter.shared.report("请先结束正在进行的录制、截图或文件操作，再重新打开 iTools。"); return
+        }
+        let launcher = Process(); launcher.executableURL = URL(fileURLWithPath: "/bin/sh")
+        // Positional arguments carry the path; no path or user text is interpreted as shell code.
+        launcher.arguments = ["-c", "i=0; while kill -0 \"$1\" 2>/dev/null; do i=$((i+1)); [ \"$i\" -lt 100 ] || exit 1; sleep 0.1; done; exec /usr/bin/open \"$2\"", "itools-relaunch", String(ProcessInfo.processInfo.processIdentifier), Bundle.main.bundleURL.path]
+        do { try launcher.run(); NSApp.terminate(nil) } catch { PermissionCenter.shared.report(error.localizedDescription) }
+    }
     private func setupMainMenu() {
         let main = NSMenu(); let appItem = NSMenuItem(); let appMenu = NSMenu()
         appMenu.addItem(withTitle: "关于 iTools", action: #selector(about), keyEquivalent: "")
@@ -100,8 +178,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(.separator())
         if model.captureEnabled { add("区域截图    " + model.shortcuts.display("quick.screenshot"), menu: menu) { self.model.takeScreenshot() }; add("屏幕文字识别    " + model.shortcuts.display("quick.ocr"), menu: menu) { self.model.takeScreenshot(ocr: true) } }
         add("剪贴板历史    " + model.shortcuts.display("quick.clipboard"), menu: menu) { self.model.showClipboard?(false) }
-        add("快捷键操作指南    " + model.shortcuts.display("app.guide"), menu: menu) { self.model.showGuide?() }
-        add("快捷键设置…", menu: menu) { self.model.showShortcutSettings?() }
+        add("快捷键与操作指南    " + model.shortcuts.display("app.guide"), menu: menu) { self.model.showShortcutSettings?(nil) }
         add("粘贴队列下一项    " + model.shortcuts.display("clipboard.next"), menu: menu) { self.model.clipboard.pasteNext() }
         add(model.clipboard.enabled ? "暂停剪贴板记录" : "开启剪贴板记录", menu: menu) { self.model.clipboard.enabled.toggle() }
         if model.recorder.isActive {
@@ -155,7 +232,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             try data.write(to: URL(fileURLWithPath: directory).appendingPathComponent("receipt.json"), options: .atomic)
         } catch { print("FAIL: Finder receipt: \(error)") }
     }
-    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool { showWindow(); return true }
+    private func writeLoginTestReceipt() {
+        guard ProcessInfo.processInfo.arguments.contains("--login-item-test"),
+              let directory = ProcessInfo.processInfo.environment["ITOOLS_LOGIN_TEST_OUTPUT"] else { return }
+        let receipt: [String: Any] = ["login": launchedAtLogin, "windowVisible": window.isVisible,
+            "accessory": NSApp.activationPolicy() == .accessory, "statusItem": status.button != nil,
+            "pid": ProcessInfo.processInfo.processIdentifier, "bundle": Bundle.main.bundleURL.path,
+            "registration": String(describing: model.loginItem.state)]
+        do {
+            try JSONSerialization.data(withJSONObject: receipt, options: [.sortedKeys])
+                .write(to: URL(fileURLWithPath: directory).appendingPathComponent("launch.json"), options: .atomic)
+        } catch { print("FAIL: login receipt: \(error)") }
+    }
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        showWindow(); writeLoginTestReceipt(); return true
+    }
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         if model.recorder.isActive {
@@ -170,8 +261,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let directory = ProcessInfo.processInfo.environment["ITOOLS_SMOKE_OUTPUT"] ?? NSTemporaryDirectory() + "itools-smoke"
         let destination = URL(fileURLWithPath: directory)
         try? FileManager.default.createDirectory(at: destination, withIntermediateDirectories: true)
-        do { try SmokeChecks.run(model: model, destination: destination) }
-        catch { print("FAIL: \(error.localizedDescription)"); exit(5) }
+        let interfacePreview = ProcessInfo.processInfo.arguments.contains("--interface-preview")
+        if interfacePreview {
+            model.clipboard.entries = [
+                ClipEntry(kind: .text, text: "单击复制，双击粘贴到之前的应用。", source: "iTools 界面样例", payload: []),
+                ClipEntry(kind: .text, text: "半透明分区通过底色与留白区分层次。", source: "iTools 界面样例", payload: []),
+                ClipEntry(kind: .text, text: "快捷键与操作指南：查看分组、修改快捷键。", source: "iTools 界面样例", payload: [])
+            ]
+        } else {
+            do { try SmokeChecks.run(model: model, destination: destination) }
+            catch { print("FAIL: \(error.localizedDescription)"); exit(5) }
+        }
         for metric in MenuBarMetric.allCases { model.menuBar.set(metric, enabled: true) }
         // Read system counters only; never request permissions or read clipboard content.
         model.monitor.start()
@@ -181,25 +281,59 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             do {
                 if let button = self.status.button { try self.quickPanelController?.verifyAndExport(button: button, destination: destination) }
             } catch { print("FAIL: \(error.localizedDescription)"); exit(8) }
+            if interfacePreview {
+                self.renderPage(index: 0, destination: destination)
+                return
+            }
+            ShortcutSmokeChecks.verifyClipboardSearch(model: self.model) { error in
+                if let error = error { print("FAIL: \(error.localizedDescription)"); exit(17) }
+                self.runShortcutSmokeChecks(destination: destination)
+            }
+        }
+    }
+    private func runShortcutSmokeChecks(destination: URL) {
             do { try ShortcutSmokeChecks.run(model: self.model, destination: destination) }
             catch { print("FAIL: \(error.localizedDescription)"); exit(9) }
             ShortcutSmokeChecks.verifyHotKeyDispatch { error in
                 if let error = error { print("FAIL: \(error.localizedDescription)"); exit(10) }
-                self.renderPage(index: 0, destination: destination)
+                // Render extra settings windows after the focus-sensitive panel checks.
+                do { try FinderMenuSmokeChecks.run(destination: destination) }
+                catch { print("FAIL: \(error.localizedDescription)"); exit(11) }
+                do { try LoginItemSmokeChecks.render(destination: destination) }
+                catch { print("FAIL: \(error.localizedDescription)"); exit(12) }
+                ShortcutWorkspaceSmokeChecks.run(model: self.model, destination: destination) { error in
+                    if let error = error { print("FAIL: \(error.localizedDescription)"); exit(13) }
+                    PermissionSmokeChecks.run(mainWindow: self.window, destination: destination) { error in
+                        if let error = error { print("FAIL: \(error.localizedDescription)"); exit(15) }
+                        self.renderPage(index: 0, destination: destination)
+                    }
+                }
             }
-        }
     }
     private func renderPage(index: Int, destination: URL) {
-        guard index <= ToolPage.allCases.count else {
+        let previews: [(ToolPage, Bool, NSSize)] = ToolPage.allCases.map { ($0, false, NSSize(width: 1120, height: 790)) } + [
+            (.overview, true, NSSize(width: 1120, height: 790)),
+            (.settings, true, NSSize(width: 1120, height: 790)),
+            (.monitor, true, NSSize(width: 1120, height: 790)),
+            (.overview, false, NSSize(width: 970, height: 680)),
+            (.settings, false, NSSize(width: 970, height: 680)),
+            (.utilities, true, NSSize(width: 1120, height: 790)),
+            (.monitor, false, NSSize(width: 970, height: 680)),
+            (.utilities, true, NSSize(width: 970, height: 680)),
+            (.clipboard, true, NSSize(width: 1120, height: 790)),
+            (.files, true, NSSize(width: 1120, height: 790)),
+            (.capture, true, NSSize(width: 1120, height: 790))
+        ]
+        guard index < previews.count else {
             model.monitor.stop()
             guard model.monitor.snapshot.memoryTotal > 0, model.monitor.snapshot.cpu != nil else { print("FAIL: system counters unavailable"); exit(6) }
-            let result = "PASS: 8 pages + dark overview; pixel export/redaction/OCR/crop/Finder staging; OS=\(ProcessInfo.processInfo.operatingSystemVersionString); cpu=\(model.monitor.snapshot.cpu ?? -1); memory=\(model.monitor.snapshot.memoryTotal); temp=\(model.monitor.snapshot.cpuTemperature ?? -1)"
+            let result = "PASS: \(ToolPage.allCases.count) pages in light/dark + minimum-width overview/settings/monitor/utilities; native interface export; OS=\(ProcessInfo.processInfo.operatingSystemVersionString); cpu=\(model.monitor.snapshot.cpu ?? -1); memory=\(model.monitor.snapshot.memoryTotal); temp=\(model.monitor.snapshot.cpuTemperature ?? -1)"
             print(result); try? result.write(to: destination.appendingPathComponent("smoke-result.txt"), atomically: true, encoding: .utf8)
             NSApp.terminate(nil); return
         }
-        if index == ToolPage.allCases.count {
-            NSApp.appearance = NSAppearance(named: .darkAqua); model.page = .overview
-        } else { model.page = ToolPage.allCases[index] }
+        let preview = previews[index]
+        NSApp.appearance = NSAppearance(named: preview.1 ? .darkAqua : .aqua)
+        model.page = preview.0; window.setContentSize(preview.2)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
             guard let view = self.window.contentView else { exit(1) }
             view.layoutSubtreeIfNeeded()
@@ -208,6 +342,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             guard let png = bitmap.representation(using: .png, properties: [:]) else { exit(3) }
             do { try png.write(to: destination.appendingPathComponent("page-\(index).png")) }
             catch { print(error); exit(4) }
+            if preview.0 == .overview || (preview.0 == .settings && (preview.1 || preview.2.width == 970)) {
+                do { try WindowGlassChecks.verifyAndExport(self.window, destination: destination, name: "window-frame-\(index)") }
+                catch { print("FAIL: \(error.localizedDescription)"); exit(14) }
+            }
             self.renderPage(index: index+1, destination: destination)
         }
     }
