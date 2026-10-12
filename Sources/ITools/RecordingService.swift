@@ -3,6 +3,7 @@ import AVFoundation
 import Combine
 import ImageIO
 import UniformTypeIdentifiers
+import IToolsCore
 
 final class RecordingService: NSObject, ObservableObject, AVCaptureFileOutputRecordingDelegate {
     enum State: String { case idle = "未录制", preparing = "准备中", recording = "录制中", paused = "已暂停", stopping = "正在保存" }
@@ -53,7 +54,12 @@ final class RecordingService: NSObject, ObservableObject, AVCaptureFileOutputRec
                         if session.canSetSessionPreset(.high) { session.sessionPreset = .high }
                     }
                     if useAudio {
-                        let device = self.audioDevices.first { $0.uniqueID == selected } ?? AVCaptureDevice.default(for: .audio)
+                        let device: AVCaptureDevice?
+                        if selected.isEmpty { device = AVCaptureDevice.default(for: .audio) }
+                        else {
+                            device = self.audioDevices.first { $0.uniqueID == selected }
+                            guard device != nil else { throw UserFacingError("所选音频设备已断开，请重新选择麦克风或虚拟音频设备。") }
+                        }
                         guard let device = device else { throw UserFacingError("未找到音频输入设备。请连接麦克风或虚拟音频设备。") }
                         let input = try AVCaptureDeviceInput(device: device)
                         guard session.canAddInput(input) else { throw UserFacingError("所选音频设备无法录制。") }
@@ -170,13 +176,20 @@ final class RecordingService: NSObject, ObservableObject, AVCaptureFileOutputRec
         let asset = AVURLAsset(url: input)
         var range: CMTimeRange?
         if trim {
-            guard let from = Panels.text("开始秒数", initial: "0"), let start = Double(from),
-                  let to = Panels.text("结束秒数", initial: String(format: "%.1f", CMTimeGetSeconds(asset.duration))), let end = Double(to),
-                  start.isFinite, end.isFinite, start >= 0, end > start, end <= CMTimeGetSeconds(asset.duration) else { return }
-            range = CMTimeRange(start: CMTime(seconds: start, preferredTimescale: 600), duration: CMTime(seconds: end-start, preferredTimescale: 600))
+            guard let from = Panels.text("开始秒数", initial: "0"),
+                  let to = Panels.text("结束秒数", initial: String(format: "%.1f", CMTimeGetSeconds(asset.duration))) else { return }
+            do {
+                let interval = try VideoTrimRange.validate(start: from, end: to, duration: CMTimeGetSeconds(asset.duration))
+                range = CMTimeRange(start: CMTime(seconds: interval.lowerBound, preferredTimescale: 600),
+                                    duration: CMTime(seconds: interval.upperBound - interval.lowerBound, preferredTimescale: 600))
+            } catch { NoticeCenter.shared.report(error); return }
+
         }
-        guard let destination = Panels.save(name: "Export-" + CaptureService.timestamp() + ".mp4", types: ["mp4"]),
-              let exporter = AVAssetExportSession(asset: asset, presetName: trim ? AVAssetExportPresetHighestQuality : AVAssetExportPreset1280x720) else { return }
+        guard let destination = Panels.save(name: "Export-" + CaptureService.timestamp() + ".mp4", types: ["mp4"]) else { return }
+        guard let exporter = AVAssetExportSession(asset: asset, presetName: trim ? AVAssetExportPresetHighestQuality : AVAssetExportPreset1280x720),
+              exporter.supportedFileTypes.contains(.mp4) else {
+            NoticeCenter.shared.report(UserFacingError("此视频不支持当前导出格式，请选择其他视频。")); return
+        }
         let temporary = destination.deletingLastPathComponent().appendingPathComponent(".itools-export-" + UUID().uuidString + ".mp4")
         exporter.outputURL = temporary; exporter.outputFileType = .mp4; exporter.shouldOptimizeForNetworkUse = true
         if let range = range { exporter.timeRange = range }
@@ -194,50 +207,4 @@ final class RecordingService: NSObject, ObservableObject, AVCaptureFileOutputRec
             }
         }
     }
-}
-final class RegionSelector {
-    static let shared = RegionSelector()
-    private var window: NSWindow?
-    func select(completion: @escaping (CGDirectDisplayID, CGRect) -> Void) {
-        guard let screen = NSScreen.screens.first(where: { $0.frame.contains(NSEvent.mouseLocation) }) ?? NSScreen.main,
-              let id = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? UInt32 else { return }
-        let hidden = NSApp.windows.filter { $0.isVisible }
-        hidden.forEach { $0.orderOut(nil) }
-        let window = SelectionWindow(contentRect: screen.frame, styleMask: [.borderless], backing: .buffered, defer: false)
-        window.level = .screenSaver; window.isOpaque = false; window.backgroundColor = .clear
-        window.isReleasedWhenClosed = false
-        let view = RegionView(frame: CGRect(origin: .zero, size: screen.frame.size))
-        view.complete = { [weak self] rect in
-            self?.window?.close(); self?.window = nil
-            hidden.forEach { $0.orderFront(nil) }; NSApp.activate(ignoringOtherApps: true)
-            guard let rect = rect, rect.width > 4, rect.height > 4 else { return }
-            let factor = screen.backingScaleFactor
-            completion(id, CGRect(x: rect.minX*factor, y: rect.minY*factor, width: rect.width*factor, height: rect.height*factor).integral)
-        }
-        window.contentView = view; self.window = window
-        window.makeKeyAndOrderFront(nil); window.makeFirstResponder(view); NSApp.activate(ignoringOtherApps: true)
-    }
-}
-final class SelectionWindow: NSWindow {
-    override var canBecomeKey: Bool { true }
-    override var canBecomeMain: Bool { true }
-}
-final class RegionView: NSView {
-    var complete: ((CGRect?) -> Void)?
-    private var start: CGPoint?
-    private var end: CGPoint?
-    override var acceptsFirstResponder: Bool { true }
-    private var selection: CGRect? {
-        guard let a = start, let b = end else { return nil }
-        return CGRect(x: min(a.x,b.x), y: min(a.y,b.y), width: abs(a.x-b.x), height: abs(a.y-b.y))
-    }
-    override func draw(_ dirtyRect: NSRect) {
-        NSColor.black.withAlphaComponent(0.3).setFill(); bounds.fill()
-        if let rect = selection { NSColor.systemBlue.setStroke(); let path = NSBezierPath(rect: rect); path.lineWidth = 2; path.stroke() }
-        ("拖动选择录制区域 · Esc 取消" as NSString).draw(at: CGPoint(x: 30, y: bounds.height-60), withAttributes: [.foregroundColor: NSColor.white, .font: NSFont.systemFont(ofSize: 22, weight: .semibold)])
-    }
-    override func mouseDown(with event: NSEvent) { start = convert(event.locationInWindow, from: nil); end = start; needsDisplay = true }
-    override func mouseDragged(with event: NSEvent) { end = convert(event.locationInWindow, from: nil); needsDisplay = true }
-    override func mouseUp(with event: NSEvent) { end = convert(event.locationInWindow, from: nil); complete?(selection?.intersection(bounds)) }
-    override func keyDown(with event: NSEvent) { if event.keyCode == 53 { complete?(nil) } }
 }

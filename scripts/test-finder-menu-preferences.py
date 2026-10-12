@@ -4,6 +4,7 @@ Only a UUID test key is written; the user's actual menu layout stays untouched.
 from pathlib import Path
 import json
 import plistlib
+import platform
 import shutil
 import subprocess
 import uuid
@@ -18,7 +19,7 @@ binary.parent.mkdir(parents=True, exist_ok=True)
     LSMinimumSystemVersion='12.0')))
 host = root / '.build/finder-menu-preference-writer'
 subprocess.run(['xcrun', 'swiftc', '-module-cache-path', str(root / '.build/module-cache'),
-                '-target', 'x86_64-apple-macosx12.0',
+                '-target', platform.machine() + '-apple-macosx12.0',
                 str(root / 'scripts/finder-menu-preferences-probe.swift'),
                 str(root / 'Sources/IToolsCore/FinderMenuLayout.swift'),
                 str(root / 'Sources/IToolsCore/FinderActions.swift'), '-o', str(host)], check=True)

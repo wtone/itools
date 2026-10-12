@@ -32,10 +32,10 @@ struct RootView: View {
             MainSidebar(model: model)
             VStack(alignment: .leading, spacing: 0) {
                 VStack(alignment: .leading, spacing: 7) {
-                    Text(model.page.rawValue).font(.system(size: 24, weight: .semibold))
+                    Text(model.page.rawValue).font(.system(size: 22, weight: .semibold))
                     Text(model.page.subtitle).font(.system(size: 12)).foregroundColor(InterfaceStyle.secondary)
                 }.frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 30).padding(.top, 48).padding(.bottom, 22)
+                    .padding(.horizontal, 30).padding(.top, 42).padding(.bottom, 18)
                 ScrollViewReader { proxy in
                 GlassScrollView(softIndicators: true) {
                     Group {
@@ -48,7 +48,7 @@ struct RootView: View {
                         case .files:
                             if model.filesEnabled { FilesPage(service: model.files, menuPreferences: model.finderMenu) }
                             else { DisabledView(title: "访达模块已关闭") }
-                        case .monitor: MonitorPage(service: model.monitor, menuPreferences: model.menuBar)
+                        case .monitor: MonitorPage(service: model.monitor, menuPreferences: model.menuBar, restoreMenuPosition: model.resetMenuBarPosition)
                         case .utilities: UtilitiesPage(model: model, awake: model.awake)
                         case .settings: SettingsPage(model: model, clipboard: model.clipboard, monitor: model.monitor)
                         }
@@ -59,7 +59,7 @@ struct RootView: View {
                 Rectangle().fill(Color.white.opacity(0.12)).frame(height: 0.5)
                 HStack(spacing: 7) {
                     Image(systemName: "info.circle").foregroundColor(InterfaceStyle.cyan)
-                    Text(notices.message).lineLimit(1).font(.system(size: 11)).foregroundColor(InterfaceStyle.secondary)
+                    Text(notices.message).help(notices.message).lineLimit(1).font(.system(size: 11)).foregroundColor(InterfaceStyle.secondary)
                     Spacer()
                     Image(systemName: "lock.shield").font(.system(size: 11)).foregroundColor(InterfaceStyle.secondary)
                 }.padding(.horizontal, 22).padding(.vertical, 10).background(InterfaceStyle.surface.opacity(0.16))
@@ -77,36 +77,37 @@ private struct MainSidebar: View {
     @ObservedObject var model: AppModel
     var body: some View {
         VStack(spacing: 4) {
-            VStack(spacing: 9) {
-                Image(systemName: "square.stack.3d.up.fill").font(.system(size: 34, weight: .medium))
-                    .foregroundColor(InterfaceStyle.cyan).frame(width: 66, height: 66)
-                    .background(Color.white.opacity(0.95)).cornerRadius(17)
-                Text("iTools").font(.system(size: 21, weight: .semibold)).foregroundColor(.white)
-                Text("v" + (Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "开发版"))
-                    .font(.system(size: 11)).foregroundColor(.white.opacity(0.62))
-            }.frame(maxWidth: .infinity).padding(.top, 48).padding(.bottom, 28)
+            HStack(spacing: 11) {
+                InstrumentIcon(name: "square.stack.3d.up.fill", color: InterfaceStyle.cyan, size: 36)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("iTools").font(.system(size: 18, weight: .semibold))
+                    Text("v" + (Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "开发版"))
+                        .font(.system(size: 10)).foregroundColor(InterfaceStyle.secondary)
+                }
+                Spacer()
+            }.foregroundColor(InterfaceStyle.text).padding(.horizontal, 22).padding(.top, 42).padding(.bottom, 18)
             ForEach(ToolPage.allCases) { page in
                 Button { model.page = page } label: {
                     HStack(spacing: 12) {
                         InstrumentIcon(name: page.icon, color: InterfaceStyle.color(for: page), size: 25)
                         Text(page.rawValue).font(.system(size: 13, weight: model.page == page ? .semibold : .medium))
                         Spacer(minLength: 0)
-                    }.foregroundColor(.white.opacity(model.page == page ? 1 : 0.82))
+                    }.foregroundColor(model.page == page ? accent : InterfaceStyle.text)
                         .padding(.horizontal, 14).padding(.vertical, 8)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(model.page == page ? Color.white.opacity(0.19) : .clear).cornerRadius(10)
+                        .background(model.page == page ? accent.opacity(0.13) : .clear).cornerRadius(10)
                         .contentShape(Rectangle())
                 }.buttonStyle(.plain).padding(.horizontal, 13).accessibilityLabel(page.rawValue)
             }
             Spacer(minLength: 15)
             Button { model.showShortcutSettings?(nil) } label: {
                 Label("快捷键与操作指南", systemImage: "keyboard").font(.system(size: 11))
-                    .foregroundColor(.white.opacity(0.86)).frame(maxWidth: .infinity).padding(.vertical, 10)
-                    .background(Color.white.opacity(0.08)).cornerRadius(9).contentShape(Rectangle())
+                    .foregroundColor(InterfaceStyle.secondary).frame(maxWidth: .infinity).padding(.vertical, 10)
+                    .background(InterfaceStyle.raised.opacity(0.5)).cornerRadius(9).contentShape(Rectangle())
             }.buttonStyle(.plain).padding(.horizontal, 17)
-            Text("Intel Mac · macOS 12+").font(.system(size: 10)).foregroundColor(.white.opacity(0.48))
+            Text("macOS 12+").font(.system(size: 10)).foregroundColor(InterfaceStyle.secondary)
                 .padding(.top, 9).padding(.bottom, 18)
-        }.frame(width: 218).background(InterfaceStyle.graphite.opacity(0.86))
+        }.frame(width: 218).background(InterfaceStyle.canvas.opacity(0.75))
     }
 }
 
@@ -127,7 +128,7 @@ struct SectionBlock<Content: View>: View {
                     VStack(alignment: .leading, spacing: 15) {
                         content()
                         if !detail.isEmpty { Text(detail).font(.system(size: 11)).foregroundColor(InterfaceStyle.secondary).fixedSize(horizontal: false, vertical: true) }
-                    }.padding(21).frame(maxWidth: .infinity, minHeight: minimumHeight, alignment: .topLeading).instrumentSurface()
+                    }.padding(18).frame(maxWidth: .infinity, minHeight: minimumHeight, alignment: .topLeading).instrumentSurface()
                 }
             }
             else { section }
@@ -182,8 +183,8 @@ struct OverviewView: View {
                 Text("常用工具").font(.system(size: 15, weight: .semibold))
             }
             LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
-                ActionTile(icon: "viewfinder", title: "截取屏幕", detail: "⌥ ⇧ 4") { model.takeScreenshot() }
-                ActionTile(icon: "doc.on.clipboard", title: "找回复制", detail: "⌥ ⌘ V") { model.navigate(.clipboard) }
+                ActionTile(icon: "viewfinder", title: "截取屏幕", detail: model.shortcuts.display("quick.screenshot")) { model.takeScreenshot() }
+                ActionTile(icon: "doc.on.clipboard", title: "找回复制", detail: model.shortcuts.display("quick.clipboard")) { model.showClipboard?(false) }
                 ActionTile(icon: "folder.badge.plus", title: "整理文件", detail: "模板与右键工具") { model.navigate(.files) }
                 ActionTile(icon: "rectangle.split.2x1", title: "安排窗口", detail: "分屏与专注工具") { model.navigate(.utilities) }
             }
@@ -191,7 +192,7 @@ struct OverviewView: View {
                 HStack(spacing: 25) {
                     MetricView(title: "CPU 使用率", value: monitor.snapshot.cpu.map { String(format: "%.0f%%", $0) } ?? "—", detail: "所有核心平均")
                     Divider().frame(height: 58)
-                    MetricView(title: "内存使用", value: monitor.snapshot.memoryTotal == 0 ? "—" : String(format: "%.0f%%", monitor.snapshot.memoryPercent), detail: bytes(monitor.snapshot.memoryUsed))
+                    MetricView(title: "内存使用", value: MetricFormatting.percent(monitor.snapshot.memoryAvailable ? monitor.snapshot.memoryPercent : nil), detail: monitor.snapshot.memoryAvailable ? bytes(monitor.snapshot.memoryUsed) : "等待可用读数")
                     Divider().frame(height: 58)
                     MetricView(title: "磁盘可用", value: monitor.snapshot.diskTotal == 0 ? "—" : bytes(monitor.snapshot.diskFree), detail: "用户所在卷")
                 }.padding(.vertical, 8)

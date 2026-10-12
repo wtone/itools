@@ -52,9 +52,10 @@ struct ClipboardPage: View {
                         Text("变量：{{date}}、{{time}}、{{clipboard}}").font(.system(size: 11)).foregroundColor(.secondary)
                         Spacer()
                         Button("添加短语") {
-                            service.saveSnippet(title: snippetTitle, body: snippetBody, group: snippetGroup)
-                            snippetTitle = ""; snippetBody = ""
-                        }.disabled(snippetTitle.isEmpty || snippetBody.isEmpty)
+                            if service.saveSnippet(title: snippetTitle, body: snippetBody, group: snippetGroup) {
+                                snippetTitle = ""; snippetBody = ""
+                            }
+                        }.disabled(snippetTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || snippetBody.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                     }
                 }
                 if service.snippets.isEmpty { EmptyState(icon: "text.quote", title: "常用回复，少打一遍", detail: "保存地址、邮件签名或重复使用的文字。选择短语可复制，或直接粘贴到之前的应用。") }

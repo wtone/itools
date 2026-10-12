@@ -63,7 +63,7 @@ public enum CapabilityCatalog {
         .init(id: "stitch", title: "图片纵向拼接", state: .builtIn, note: "手动导入多张图，按顺序拼接；不是自动滚动捕获"),
         .init(id: "clipboard", title: "剪贴板历史、分组、收藏、快捷短语", state: .builtIn, note: "文本、富文本、图片和文件；本地保存"),
         .init(id: "finder", title: "访达右键、新建模板、文件整理", state: .builtIn, note: "Finder Sync 扩展需在系统设置启用"),
-        .init(id: "monitor", title: "CPU、内存、GPU、磁盘、网络、电池、温度、风扇", state: .builtIn, note: "SMC 为只读；传感器随 Intel 机型而异"),
+        .init(id: "monitor", title: "CPU、内存、GPU、磁盘、网络、电池、温度、风扇", state: .builtIn, note: "SMC 只读；CPU 温度按芯片适配，传感器随机型而异"),
         .init(id: "windows", title: "窗口布局、防休眠、便笺、链接清理", state: .builtIn, note: "窗口操作需辅助功能权限"),
         .init(id: "scroll", title: "自动滚动长截图、带壳截图、视频编辑时间线", state: .planned, note: "当前未提供；需独立实现截图捕获与视频编辑能力"),
         .init(id: "sync", title: "iCloud 同步、全局短语自动展开", state: .planned, note: "当前未提供；剪贴板历史与短语目前仅在本机使用"),

@@ -1,5 +1,7 @@
 # 验证记录
 
+最新检查见 [2026-10-07 功能与界面检查](AUDIT-2026-10-07.md)。下方保留历史版本验证记录。
+
 验证日期：2026-09-09；0.6.1 启动修复补充于 2026-09-10。开发及运行环境：**Intel x86_64、macOS 13.7.8 (22H730)、Swift 5.9.2、Xcode macOS SDK 14.2**。
 
 ## 已完成
@@ -369,3 +371,93 @@
 - 日志：`.build/dark-border-guide-build.log`、`dark-border-guide-preview.log`；预览位于 `.build/preview-dark-border-guide`。本轮为样式和入口调整，未重复完整功能 / 核心测试，未执行真实粘贴或修改用户权限与剪贴板历史；样例记录仅在内存中生成。
 - 已安装并打开 `/Applications/iTools.app` **0.13.7 / build 28**，四份清单与五个 x86_64 二进制的 macOS 12 部署目标、构建 / 安装哈希均一致，沿用原固定本地签名身份。旧版备份：`.build/install-backups/iTools-0.13.6-94a7fabf-84b0-4681-8292-e2f4dd5564a8.zip`。
 - ZIP 完整性通过：`dist/iTools-0.13.7-intel.zip`，SHA256 `71dc07540c31bac7ebf2e8a34493488f21c7891218affa87b75d343716bf12b5`。安装、二进制和打包日志：`.build/dark-border-guide-install.log`、`dark-border-guide-binaries.log`、`dark-border-guide-package.log`。实机 Intel / macOS 13.7.8，macOS 12 为编译部署目标。
+
+## 可调整选区的区域截图工作区（2026-10-08）
+
+- 区域截图使用所有显示器的冻结画面及灰色透明蒙层，框选后留在原界面调整边界、移动选区或标注。八个调整点、原位编辑工具栏、颜色与大小、共同撤销/重做、重新框选、完成保存复制及 Esc 取消均已接入；一个选区位于一个显示器内。
+- .build/region-workspace-final-check.log：最终通用发行版的 25 项截图专项检查全部通过。新检查使用三个合成显示器、生产窗口/画布的原生事件、NSTextView 和独立命名剪贴板，覆盖多屏与窗口选择、边界限制、调整撤销、标注坐标、中文输入法组词提交以及最终输出不含蒙层/工具栏。不会读取桌面或修改系统剪贴板。
+- .build/region-workspace-core-tests.log：126 项核心测试通过。.build/region-workspace-final-build.log：Intel + Apple Silicon 构建及深度严格签名通过，macOS 12 为部署目标。
+- 已检查工作区蒙层及浅深色自身控件渲染并保存预览。CUA 启动隔离鼠标预览超时，真实桌面截图流程未完成人工验证；没有残留预览进程。当前编辑实例保留，最终应用位于 dist/iTools.app，退出重开后生效。此记录不代表其他模块完整回归通过。
+
+## 主显示器菜单栏与标注交互（2026-10-08）
+
+- 当时尝试依据 `NSScreen.screens.first` 处理本应用原生状态项副本的透明度和鼠标穿透，监听显示器、窗口、桌面变化。未修改系统显示器或 Spaces 设置。此方式仍会为副屏副本保留布局宽度，不能满足副屏完全不占位的要求。
+- `.build/menu-bar-primary-delivery-check.log`：当时检查确认主屏 ID 1 的 alpha 为 1、副屏 ID 2 为 0、`ignoresMouseEvents` 标记为 true；并没有验证实际鼠标命中。2026-10-10 用户反馈副屏仍可悬停查看信息，证明这些标记不能作为完成验收。指标独立开关、暂停状态、固定宽度及模拟显示目标恢复检查通过；未截取屏幕或改写用户指标偏好。
+- 悬停对象可直接移动/缩放；文字工具为 T，双击图片内文字原位编辑，点击处定位光标，失焦提交。实际鼠标事件及原生 NSTextView 焦点、撤销、重做、删除、取消和导出检查通过。详情及自身控件预览见 `docs/CAPTURE-WORKFLOW.md`。
+- `.build/annotation-hover-core-tests.log`：126 项核心测试通过。`.build/annotation-primary-delivery-check.log`：19 项截图专项检查通过。`.build/annotation-primary-delivery-build.log`：Intel + Apple Silicon 通用发行版构建及深度严格签名通过；macOS 12 为部署目标，实机为 Apple Silicon / macOS 15.8.1。
+- CUA 只读观察确认当前运行的旧编辑器有尚未保存的「测试文字」标注，未强制重启或替换图片。新版本位于 `dist/iTools.app`，保存当前编辑后退出重开即可生效。本次未重复其他模块的完整界面回归，先前剪贴板浮窗焦点检查的失败记录保持有效。
+
+## 菜单栏副屏零占位修复（2026-10-10）
+
+- 验收目标：工具箱和全部指标仍采用两行原生样式，只在 macOS 主显示器显示；扩展屏没有空白槽位、悬停信息或点击入口。使用公开状态项工厂保留 KVO 和位置保存，限定原始合成器项目的显示器并原生卸载副本；覆盖 metrics 更新及异步副本重建。恢复隐藏状态时处理原生 `FLT_MAX` 位置，停止观察不写入隐藏偏好。快捷面板和右键菜单从本应用实际合成器窗口取得锚点。
+- `.build/menu-bar-primary-only-final-build.log`：Intel + Apple Silicon 通用发行版构建及严格深度签名通过。最低部署目标 macOS 12；实际运行验证仅为 Apple Silicon / macOS 15.8.1 / Xcode 16.4。
+- `.build/menu-bar-primary-only-final-check.log`：发行版菜单栏专项通过。实际两屏为主屏 ID 1、1728×1117 点，副屏 ID 2、(-1920, 0)、1920×1080 点，原生菜单栏高度分别 37 / 24 点。WindowServer 只保留一个主屏可见原始窗口；副屏邻近原生项目与 iTools 完全移除时的位置相同。检查实际窗口位置、宽度、原生高度、切换限定目标、无显示目标和恢复，保留独立指标开关、暂停读数及固定宽度。随后 30 次正常系统采样期间检查仍只有主屏项目和正确按钮锚点。不再把 alpha / ignoresMouseEvents 标记本身当作副屏验收。
+- `.build/menu-bar-primary-only-panel-check.log` 与 `.build/menu-bar-primary-only-panel-recheck.log`：主副屏快捷面板分别 36 次实时内容刷新检查通过，位置、焦点和主窗口不移动。该命令随后串联的全量检查两次在长截屏控制器四秒等待中失败（`scrolling controller did not advance in time`），因此不能声称全量 GUI 回归全部通过。原因及实际截图流程影响尚未确认，未将该结果标记为已修复或既有独立问题。
+- `.build/menu-bar-primary-only-capture-check.log`：同一发行版单独运行截图专项，25 项全部通过，包括手动长图追加、自动转手动恢复、进行中结束后取最后帧，以及多屏选区、原位编辑、标注移动缩放、文字编辑、撤销和独立剪贴板输出。
+- 没有修改系统显示器/Spaces 设置、人工插拔显示器或拍摄用户桌面。验收使用本应用窗口元数据、真实原生布局及自身控件；真实用户鼠标点击/悬停尚未另行手工验证。内部 AppKit 入口有运行时检查，其他 macOS 版本未实机验证。
+- 重启前确认当前截图编辑区没有待保存内容，正常退出旧实例。最终尝试打开新版时 CUA 返回 Mac 已锁屏，等待用户手动解锁后完成正常运行的重新打开和观察。
+
+
+## 0.13.8：Finder 右键可见但不执行（2026-10-11）
+
+- 验收目标：启动 iTools 后，从 Finder 右键菜单直接执行所选文件或目录的操作；连续点击正确复用后台组件，保留既有确认、重名保护和功能开关；启动失败时给出可见错误。
+- 实机复现：开发目录中的 0.13.7 已启用扩展。点击测试目录中的「新建 TXT」没有生成文件；`IToolsFinder` 日志显示「找不到 iTools 主程序」，随后 FinderSync 捕获提示窗口异常。真实沙盒发送器确认主程序和 worker 的旧 filesystem/Bundle 预检均返回 false，Launch Services 却能成功打开同一组件。这是错误的存在性预检，不能据此认定组件未安装。
+- 修复：从系统已加载的扩展位置推导所属应用及组件，交给 Launch Services 验证启动。备用路径仅来自系统对准确 bundle ID 的查询；文件操作只在明确的缺失应用/可执行文件错误时尝试备用路径，超时或结果未知不重放。扩展不再创建 modal alert，严格解析的 `itools://finder-error` 只显示信息，由明确指定的所属主程序接收。
+- 额外发现并处理：系统将 `itools` scheme 关联到本仓库旧 `RegionCapturePreview.app`。已移除这条预览注册；生产错误通道显式指定应用路径，避免依赖此默认关联。未改动其他软件的默认打开方式、扩展或授权。
+- Finder 核心回归 **24 项通过**，覆盖沙盒不能预检时的路径发现、路径顺序/去重、错误链接解析、请求身份、特殊字符、菜单布局及 Apple Event 校验。日志 `.build/finder-click-core-check.log`。
+- 最终通用包通过真实沙盒冷/热启动及 **29 项直接操作回归**：原生 TXT 新建与 Finder reveal、重名保护、实际测试文件的多格式新建、隐藏/显示、剪切粘贴、散列/扫描、ZIP/7z、写权限、排队与重复请求等。测试目录独立；完整回归中的 clipboard/app/Terminal/recycle 使用既有隔离钩子，不操作用户剪贴板、终端或废纸篓。日志 `.build/finder-click-sandbox-final-check.log`。新发送器调用生产的路径发现逻辑，并记录旧预检结果，覆盖此前测试绕过的故障位置。
+- 真实 UI 验证：通过 Finder 鼠标右键新建 TXT 和 Markdown；最终更新后再次右键新建 TXT 得到「未命名 2.txt」。界面与文件系统都确认原 TXT、Markdown 保留，新 TXT 为空。记录 `.build/finder-click-actual-result.json`。从真实沙盒发送 display-only 错误链接，冷启动正确主程序并在界面出现测试提示，已关闭；日志 `.build/finder-click-error-cold-check.log`。
+- 主程序、Finder 扩展、操作组件及登录组件统一为 **0.13.8 / build 29**；Intel + Apple Silicon 通用构建、递归严格签名、`git diff --check` 通过。构建日志 `.build/finder-click-final-build.log`。已刷新本应用的 Finder 注册并恢复启用，保留新版主程序运行。
+- 验证范围：本机 macOS 15.8.1 / Apple Silicon。未自动向 AirDrop 接收者发送文件、操作用户文件、执行彻底删除，或新增系统权限；这些独立功能不因启动链路回归而视为本轮逐项实机验收。
+
+
+## 0.13.9：刘海屏拖动后指标隐藏（2026-10-12）
+
+- 验收目标：主屏指标完整避开刘海；错误拖动松手后恢复，旧遮挡位置不能导致重启后继续隐藏；保留正常位置与指标开关，扩展屏仍无占位或点击入口。
+- 真实故障证据：保存的 `NSStatusItem Preferred Position iTools.metrics` 为 835；本机主屏为 1728×1117，刘海右侧辅助区域 x=956、宽 772。运行中 iTools 原窗口 x=677、宽 272，与刘海相交且不在 on-screen 列表。首次通过现有「恢复可见位置」入口恢复，实际窗口 x=1265、宽 272，进入 on-screen 列表。
+- 修复：启动按真实主屏的 `auxiliaryTopRightArea` 修正越界、负数及非有限的本应用保存位置；运行时检查实际 WindowServer 按钮坐标，鼠标按下不干预，持续遮挡至少 0.8 秒后通过 AppKit 隐藏/重新安装更新原状态项，同时恢复保存位置及兼容层缓存。有效的可见位置继续保存；不新增权限或改变主显示器设置。原有两行读数、指标开关、手动恢复入口和主屏独占保留。
+- 位置规则 **3 项测试通过**：用户故障值 835、有效值、无效数值、完整避开刘海、原生窗口与辅助区域高度差异、无刘海屏及负坐标屏。日志 `.build/notch-placement-core-check.log`。
+- 最终通用包原生回归通过：首启遮挡偏好修正；测试进程的真实状态窗口被放到刘海相交位置后自动恢复；有效偏好 60 保留；隐藏/重新安装仍正常；扩展屏 WindowServer 项与原生布局占位检查、宽度变化、显示器切换、缺失屏幕恢复、7 项指标独立开关与固定宽度，以及 **30 次正常刷新**全部通过。日志 `.build/notch-placement-native-final-check.log`；实际按钮从 x=790、宽 332 恢复到 x=1197、宽 332，记录 `.build/notch-placement-native-final/menu-bar-notch-check.txt`。测试只操作自身窗口、偏好与原生布局，没有向其他应用合成鼠标或键盘事件；原生 registry 偏好单独修改不会移动 WindowServer 槽位，回归用真实窗口位置复现碰撞，不能把偏好写入当作已复现隐藏。
+- 正常启动复核：确认应用退出后，重新写入用户原故障值 835，再从实际 `dist/iTools.app` 启动最终版。保存值自动变为 0；WindowServer 仅有 **1 个可见** iTools 状态窗口，位置 `(1265, 0, 272, 37)`，完整位于刘海右侧，alpha=1，扩展屏无可见副本。记录 `.build/notch-placement-restart-seed.log`、`.build/notch-placement-restart-result.json`。新版保持运行。
+- **0.13.9 / build 30** 的 Intel + Apple Silicon 通用构建和递归严格签名通过，Finder 扩展登记为已启用的 0.13.9。日志 `.build/notch-placement-final-build.log`。`git diff --check` 通过。实机范围为当前 macOS 15.8.1、Apple Silicon、刘海主屏加扩展屏；未以静态几何测试宣称其他 macOS 或机型已逐一实测。
+
+## 0.13.10：紧凑菜单栏与 M2 温度 / 风扇（2026-10-12）
+
+- 验收目标：保留原来的两行样式，缩小菜单栏占用、各列间距一致、网速始终左对齐；当前 M2 Pro 的温度与风扇显示真实采样，合法的 0 RPM 不视为缺失；保留主屏独占、刘海恢复及用户指标偏好。
+- 根因：`it_sensor_sample` 的整个 SMC 路径仅编译进 x86_64，arm64 返回四个 NaN；实际 M2 Pro 上 AppleSMC 只读连接成功，CPU 核心键及两只风扇均可读。移除架构门禁，沿用只读命令 9 / 5；增加 M2 CPU 核心键，取已成功读取核心的最高温度并显示来源。通用解码验证格式、长度、有限值和 RPM 范围，真实 0 RPM 保留。不写 SMC、不控制风扇、不增加权限或特权组件。
+- 解码与菜单栏偏好 **9 项单元测试通过**，覆盖 Intel 固定点、Apple Silicon 浮点、零转速、损坏 / 未知 / 非有限输入及既有指标开关与格式。日志 `.build/compact-sensors-core-check.log`。真实只读采样记录 `.build/compact-sensors-live-reading.log`：CPU 62.11°C、核心最高标记为 1，两只风扇各 0 RPM；采样时温度随负载变化，未为测试主动压测或调节风扇。
+- 绘制使用普通列 28 点、网速列 58 点、统一 4 点间距及 8 点状态项内边距；设置预览复用相同图像和尺寸。原生像素检查覆盖长短上传 / 下载值，要求两行的首个墨迹 x 相差不超过 1 像素，且居中对照必须产生不同起点，避免无效像素测试。导出 `.build/compact-sensors-native-debug/menu-bar-compact.png`、`network-left-aligned.png` 及真实七项读数 `menu-bar.png` 已目视检查。
+- Debug 原生专项通过：各指标独立开关、暂停读数、数字 / 单位变化时固定宽度，副屏 WindowServer 项与布局零占位，主屏切换与缺失恢复、刘海相交的真实窗口恢复，以及 30 次正常系统采样检查。日志 `.build/compact-sensors-native-debug-check.log`。硬件为 Apple M2 Pro / macOS 15.8.1 / 刘海主屏加左侧扩展屏；其他芯片的 CPU 温度映射及其他 macOS 版本未因此视为已实测。
+- 最终 **0.13.10 / build 31** 的 Intel + Apple Silicon 通用构建与递归严格签名通过，Finder 扩展保留启用并登记为 0.13.10。最终发行版重复菜单栏专项全部通过，实时读数为 CPU 温度 52°、两只风扇各 0 RPM。日志 `.build/compact-sensors-final-build.log`、`.build/compact-sensors-native-final-check.log`，读数 `.build/compact-sensors-native-final/menu-bar-live.txt`。`git diff --check` 通过。
+- 正常重新打开时，电脑已锁屏，CUA 无法完成启动后的实际界面复核。已请求用户手动解锁；本轮暂不将正常运行界面与当前五项指标的实际 230 点宽度标记为实机通过。上述传感器实测与最终原生专项已完成，解锁后继续核对正常运行状态。
+- 后续解锁后的界面复核（2026-10-12）：实际 0.13.10 系统状态页显示 CPU 温度 48.9°C、第一风扇 0 RPM / 第二风扇 0 RPM。用户当前菜单栏选择为 CPU / 内存 / GPU / 磁盘 / 网速，温度和风扇开关关闭；保留当前用户选择，未为检查改动开关。
+
+## 0.13.11：默认位置改为靠左（2026-10-12）
+
+- 验收目标：首次显示、旧版最右侧默认位置和手动恢复入口使用状态图标区最左侧的可见位置；完整避开刘海，保留有效手动拖动位置、主屏独占及当前指标配置。
+- 实际原生测试确认 preferred position 影响插入顺序，并非精确 x。直接使用很大的值会把本应用测试项放到刘海后面；隐藏 / 重新安装后的窗口坐标异步更新，不能马上把旧窗口坐标视为新位置已完成。沿用已有安装入口，分次等待布局完成，仅读取本项的 WindowServer 窗口完整范围，必要时在有限候选中选择最靠左可见的位置。旧值 0 初始化靠左，有效的非零拖动位置继续保留。
+- Debug 专项通过：七指标默认按钮由右侧 x=1251 移到 x=972；真实刘海碰撞、隐藏 / 重新安装、有效偏好 60 保留、副屏布局零占位、指标固定宽度及 30 次正常刷新通过。记录 `.build/menu-bar-left-native-debug/menu-bar-notch-check.txt`，日志 `.build/menu-bar-left-native-debug-check.log`。没有向其他应用合成输入、改动主屏或 Spaces 设置。
+- 补充完整窗口边缘检查时，正常刷新回归暴露原生异步移动的边界；随后将候选等待时间调整为至少 0.3 秒，并将运行时恢复判断也从按钮改为完整 WindowServer 窗口。修正后 Debug 专项与 30 次正常刷新全部通过；候选日志记录真实窗口坐标，不以偏好写入成功替代实际位置验收。
+- 实际主程序最初点击恢复后仍为 x=1307，并出现一个不可见旧窗口记录。将恢复操作改为复用当前状态项；初始化意图在 `prepareAutosave` 中读取并传入监控器，不再在 AppKit 加载槽位后重新判断。最终 **0.13.11 / build 32** 的 Intel + Apple Silicon 通用构建、递归严格签名及全部菜单栏专项通过。日志 `.build/menu-bar-left-final-build.log`、`.build/menu-bar-left-native-final-check.log`。
+- 正常运行实测：当前五项指标的原生可见窗口为 `(1028, 0, 230, 37)`，完整位于刘海右側 x≥956 的可见区域；对比原最右側 x=1307 明显靠左。正常启动与点击「恢复可见位置」均保持这一位置、同一进程及一个主屏可见入口，记录 `.build/menu-bar-left-startup-result.json`、`.build/menu-bar-left-restore-result.json`。WindowServer 保留的不可见缓存窗口不计为可见入口；副屏是否占位仍由真实原生布局见证检查验收。实际页面显示新版及真实温度 / 风扇读数，未改动指标开关。
+- 计划再次正常退出 / 打开时，CUA 检测到用户正在操作应用；重新读取状态确认用户已关闭 GPU 指标，因此停止界面控制并保留最新选择及应用运行。本轮第二次正常重启未完成，不将其标记为已实测；上述正常首次启动、真实恢复操作及原生启动 / 重新安装专项已完成。
+
+## 0.13.12：菜单栏数值与名称字体层级（2026-10-12）
+
+- 上方数值由 9 点中等字重改为 11 点半粗等宽数字，下方名称缩为 7.5 点中等字重。网速上下两行均为数值，统一为 10 点并保持左对齐；暂停时的 NET 名称仍用较小字号。沿用普通列 28 点、网速列 58 点、4 点间距与 22 点图像高度，设置预览继续复用同一绘制函数。
+- 生产绘制函数的独立示意渲染 `.build/menu-typography-preview.png` 和实际七指标导出 `.build/menu-typography-native-final/menu-bar.png` 已目视检查，数值与名称层次清楚、两行不重叠。长短网速像素左对齐、各项开关 / 暂停读数、数值与单位变化的固定宽度、主副屏原生布局与零占位以及 30 次正常刷新检查均在修正后的 Debug 版本通过。日志 `.build/menu-typography-diagnostic-check.log`。
+- 原生回归曾记录坐标 `(964, 0, 294, 37)` 位于安全区域，状态项 installed=1、窗口 visible=true，但 WindowServer on-screen 列表为空。位置校准和自动恢复补充读取本项的真实 on-screen 标志；任意鼠标按下不再一律取消校准，仅 ⌘ 按下且指针位于本项范围的拖动接管。系统报告菜单栏隐藏时暂停校准。自检切换显示器及临时 autosave 名称后恢复靠左可见位置并等待完成，不以坐标正确或偏好写入作为显示成功。没有为验证修改系统菜单栏隐藏或全屏设置，相关主动隐藏行为未另行人工切换实测。
+- 最终 **0.13.12 / build 33** 的 Intel + Apple Silicon 通用构建及递归严格签名通过；发行版字体 / 网速像素、固定宽度、主副屏布局和 30 次实时可见性专项全部通过。日志 `.build/menu-typography-final-build.log`、`.build/menu-typography-native-final-check.log`。未重复与本次字体改动无关的核心单元测试。
+- 正常打开新版并核对实际页面，用户当前 CPU / 内存 / 磁盘 / 网速开启，GPU / 温度 / 风扇关闭，选择保持原样。主屏仅一个可见状态窗口，坐标 `(1060, 0, 198, 37)`，完整避开刘海，四项指标仍为原有 198 点宽度；记录 `.build/menu-typography-running-result.json`。应用保持运行，`git diff --check` 通过。
+
+
+## 0.13.13：主图标及指标独立 ⌘ 拖动（2026-10-12）
+
+- 验收目标：主图标及七类指标各自成为真实 NSStatusItem，由 macOS 提供 ⌘ 拖动及位置保存；开关、刷新、重启保持用户排列，主屏限定和刘海恢复继续有效。主图标沿用 iTools.metrics，指标使用追加枚举值的独立 autosave 名称。没有新增永久排序模型。
+- 保留普通内容列 28 点、网速 58 点及 22 点高度、11 / 7.5 点字体和网速左对齐。独立原生窗口各有两侧 8 点系统留白，不额外增加内边距；当前四指标加主图标的原生窗口宽度合计为 238 点。示意渲染使用同样的原生留白，五指标示例 282 点，已目视检查。
+- 专项复现 AppKit 移除项目后删除位置键：`.build/status-autosave-probe.log` 记录 120 → nil。移除前保留同一原生键，重新创建后安装到保存的槽位；实际移位后关闭 / 开启内存指标的顺序恢复检查通过。
+- 同时恢复多项时曾出现过期布局将窗口移到副屏坐标。改为统一卸载、设置原生位置后统一安装，并等待实际 WindowServer 可见性；恢复请求被正在进行的整组放置推迟时不消耗单项恢复机会。批量版本原生回归通过，日志 `.build/menu-independent-native-atomic-check.log`。
+- 最终 **0.13.13 / build 34** 的 Intel + Apple Silicon 通用构建及递归严格签名通过：`.build/menu-independent-final-build.log`。发行包专项 `.build/menu-independent-native-final-check.log` 通过八个独立项目与唯一名称、主图标 / 网速实际换位、内存指标重新开启保留顺序、采样时对象与宽度不变、网速像素左对齐、暂停读数、刘海碰撞恢复及有效原生位置保留。整体与单项原生布局见证均验证副屏零占位，随后 30 次实际可见性 / 按钮锚点检查通过。
+- 原生换位测试使用本测试进程的已检查安装入口与实际窗口坐标，未把写入偏好当作已经移动。没有自动合成真实 ⌘ 鼠标拖动手势；拖动本身由保留的公开 NSStatusItem 工厂及原生按钮提供。
+- 正常启动和一次正常退出 / 重开实测通过：进程由 91106 变为 91186，五个主屏窗口的位置、原生保存值和 CPU / 内存 / 磁盘 / 网速选择完全相同。总窗口宽度 238 点，全部避开刘海，记录 `.build/menu-independent-startup-result.json`、`.build/menu-independent-restart-result.json`。真实界面确认版本与独立拖动说明；GPU / 温度 / 风扇保持关闭，未改变用户开关。
+- 本轮仅验证菜单栏相关路径，没有重复无关功能的整套测试或宣称其他平台已实测。没有修改系统主屏、Spaces、菜单栏自动隐藏设置或其他应用偏好。

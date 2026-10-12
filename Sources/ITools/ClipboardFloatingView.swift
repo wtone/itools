@@ -20,7 +20,7 @@ struct ClipboardFloatingView: View {
             .onChange(of: state.query) { _ in state.reconcile() }
             .onChange(of: state.kind) { _ in state.reconcile() }
             .onChange(of: state.group) { _ in state.reconcile() }
-            .onChange(of: state.snippets) { _ in state.reconcile() }
+            .onChange(of: state.snippets) { _ in state.modeChanged() }
             .onChange(of: service.entries.map(\.id)) { _ in state.reconcile() }
     }
     private var verticalContent: some View {
@@ -34,8 +34,8 @@ struct ClipboardFloatingView: View {
                 if !state.query.isEmpty { Button { state.query = "" } label: { Image(systemName: "xmark.circle.fill") }.buttonStyle(.plain) }
                 if !state.snippets {
                     Picker("类型", selection: $state.kind) { ForEach(["全部类型","文字","图片","文件"], id: \.self) { Text($0) } }.labelsHidden().frame(width: 90)
-                    Picker("分组", selection: $state.group) { ForEach(service.groups, id: \.self) { Text($0) } }.labelsHidden().frame(width: 86)
                 }
+                Picker("分组", selection: $state.group) { ForEach(state.groups, id: \.self) { Text($0) } }.labelsHidden().frame(width: 86)
             }.padding(.horizontal, 18).padding(.vertical, 11)
             Divider()
             if state.items.isEmpty {
@@ -146,9 +146,9 @@ struct ClipboardFloatingView: View {
         }.fixedSize()
     }
     @ViewBuilder private var groupMenu: some View {
-        if !state.snippets {
+        Group {
             Menu {
-                Picker("分组", selection: $state.group) { ForEach(service.groups, id: \.self) { Text($0).tag($0) } }
+                Picker("分组", selection: $state.group) { ForEach(state.groups, id: \.self) { Text($0).tag($0) } }
             } label: {
                 Label(state.group == "全部" || state.group == "收藏" ? "分组" : state.group, systemImage: "folder")
                     .font(.system(size: 11)).lineLimit(1).frame(maxWidth: 90).padding(.horizontal, 4)

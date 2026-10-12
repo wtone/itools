@@ -1,14 +1,14 @@
 import SwiftUI
 import AppKit
 
-/// Shared glass, neutral typography and category colors, following the iCopy reference.
+/// Shared glass, neutral typography and category colors, using native macOS materials.
 enum InterfaceStyle {
-    static let canvas = adaptive(0xEEE9E7, 0x28262C)
-    static let surface = adaptive(0xFFFCFA, 0x716B78)
-    static let raised = adaptive(0xFFFFFF, 0x807987)
+    static let canvas = adaptive(0xF4F5F7, 0x202123)
+    static let surface = adaptive(0xFFFFFF, 0x38383A)
+    static let raised = adaptive(0xFFFFFF, 0x454547)
     static let text = adaptive(0x302E32, 0xF5F3F6)
-    static let secondary = adaptive(0x757079, 0xD8D2DF)
-    static let border = adaptive(0xDBD5DE, 0x9991A2)
+    static let secondary = adaptive(0x636369, 0xC2C2C7)
+    static let border = adaptive(0xD8D8DE, 0x636369)
     static let cyan = adaptive(0x1BA9C0, 0x42BED2)
     static let violet = adaptive(0x9861D5, 0xAB7DDF)
     static let amber = adaptive(0xE8A032, 0xE8AE56)
@@ -69,7 +69,7 @@ extension EnvironmentValues {
 }
 
 struct InstrumentSurface: ViewModifier {
-    var radius: CGFloat = 22
+    var radius: CGFloat = 16
     var tint: Color? = nil
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @Environment(\.colorScheme) private var scheme
@@ -78,7 +78,7 @@ struct InstrumentSurface: ViewModifier {
         content
             .background {
                 ZStack {
-                    InterfaceStyle.surface.opacity(reduceTransparency ? 1 : (scheme == .dark ? 0.54 : 0.52))
+                    InterfaceStyle.surface.opacity(reduceTransparency ? 1 : (scheme == .dark ? 0.82 : 0.78))
                     if scheme == .dark && !reduceTransparency {
                         LinearGradient(colors: [.white.opacity(0.055), .white.opacity(0.01)], startPoint: .top, endPoint: .bottom)
                     }
@@ -95,7 +95,7 @@ struct InstrumentSurface: ViewModifier {
 }
 
 extension View {
-    func instrumentSurface(radius: CGFloat = 22, tint: Color? = nil) -> some View {
+    func instrumentSurface(radius: CGFloat = 16, tint: Color? = nil) -> some View {
         modifier(InstrumentSurface(radius: radius, tint: tint))
     }
 }
@@ -107,7 +107,7 @@ struct InstrumentIcon: View {
     var body: some View {
         Image(systemName: name).font(.system(size: size * 0.46, weight: .medium))
             .foregroundColor(.white).frame(width: size, height: size)
-            .background(LinearGradient(colors: [color, color.opacity(0.72)], startPoint: .topLeading, endPoint: .bottomTrailing))
+            .background(color)
             .overlay(RoundedRectangle(cornerRadius: size * 0.26).strokeBorder(Color.white.opacity(0.24), lineWidth: 0.6))
             .cornerRadius(size * 0.26)
     }
@@ -123,14 +123,7 @@ struct FrostedBackground: View {
             else {
                 FrostedMaterial()
                 if tinted {
-                    LinearGradient(stops: [
-                        .init(color: Color.pink.opacity(0.13), location: 0),
-                        .init(color: Color.orange.opacity(0.07), location: 0.35),
-                        .init(color: Color.green.opacity(0.08), location: 0.62),
-                        .init(color: Color.cyan.opacity(0.13), location: 0.82),
-                        .init(color: Color.purple.opacity(0.12), location: 1)
-                    ], startPoint: .topLeading, endPoint: .bottomTrailing)
-                        .opacity(scheme == .dark ? 0.65 : 1)
+                    InterfaceStyle.canvas.opacity(0.86)
                 }
             }
         }.allowsHitTesting(false)

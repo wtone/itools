@@ -12,6 +12,6 @@ let package = Package(
             .linkedFramework("AppKit"), .linkedFramework("AVFoundation"), .linkedFramework("Vision"),
             .linkedFramework("Carbon"), .linkedFramework("IOKit"), .linkedFramework("QuartzCore")
         ]),
-        .testTarget(name: "IToolsCoreTests", dependencies: ["IToolsCore"])
+        .testTarget(name: "IToolsCoreTests", dependencies: ["IToolsCore", "SystemBridge"])
     ]
 )

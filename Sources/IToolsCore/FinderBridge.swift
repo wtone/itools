@@ -54,10 +54,41 @@ public enum FinderHostLocation {
         var visited = Set<URL>()
         return (candidates + fallbacks).map(\.standardizedFileURL).first { visited.insert($0).inserted && valid($0) }
     }
+    /// The OS already loaded this extension from its containing app. A Finder
+    /// sandbox cannot reliably read that app's Info.plist or executable (notably
+    /// in a development folder), so let Launch Services validate the launch.
+    /// The fallback comes only from its lookup of our exact host bundle ID.
+    public static func launchCandidates(extensionURL: URL, registeredHost: URL?) -> [URL] {
+        let candidates = containingApplication(extensionURL: extensionURL).map { [$0] } ?? []
+        var visited = Set<URL>()
+        return (candidates + (registeredHost.map { [$0] } ?? []))
+            .filter { $0.isFileURL && $0.pathExtension == "app" }
+            .map(\.standardizedFileURL).filter { visited.insert($0).inserted }
+    }
     public static func isHost(_ url: URL) -> Bool {
         guard url.isFileURL, url.pathExtension == "app", let bundle = Bundle(url: url), bundle.bundleIdentifier == bundleID,
               let executable = bundle.executableURL else { return false }
         return FileManager.default.isExecutableFile(atPath: executable.path)
+    }
+}
+
+/// FinderSync cannot present an application-owned modal alert. Its registered
+/// public URL handler brings launch failures to the main app without executing
+/// any file action or requiring additional sandbox/Automation permissions.
+public enum FinderLaunchFailure {
+    public static func makeURL(_ message: String) -> URL? {
+        guard !message.isEmpty, message.utf8.count <= 4096 else { return nil }
+        var c = URLComponents(); c.scheme = "itools"; c.host = "finder-error"
+        c.queryItems = [.init(name: "message", value: message)]
+        return c.url
+    }
+    public static func message(in url: URL) -> String? {
+        guard let c = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              c.scheme == "itools", c.host == "finder-error", c.user == nil, c.password == nil,
+              c.port == nil, c.path.isEmpty, c.fragment == nil,
+              let items = c.queryItems, items.count == 1, items[0].name == "message",
+              let message = items[0].value, !message.isEmpty, message.utf8.count <= 4096 else { return nil }
+        return message
     }
 }
 

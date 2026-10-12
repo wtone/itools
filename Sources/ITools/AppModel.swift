@@ -50,6 +50,7 @@ final class AppModel: ObservableObject {
     var clipboardSelectionAction: ((String) -> Void)?
     var showGuide: (() -> Void)?
     var showShortcutSettings: ((ShortcutCategory?) -> Void)?
+    var resetMenuBarPosition: (() -> Void)?
     var showToolbox: (() -> Void)?
     var performQuickAction: ((QuickAction) -> Void)?
     init() {

@@ -35,7 +35,7 @@ final class ClipboardPanelState: ObservableObject {
     init(service: ClipboardService) { self.service = service }
     var items: [ClipEntry] {
         if snippets {
-            return service.snippets.filter { query.isEmpty || $0.title.localizedCaseInsensitiveContains(query) || $0.body.localizedCaseInsensitiveContains(query) }
+            return service.snippets.filter { (group == "全部" || $0.group == group) && (query.isEmpty || $0.title.localizedCaseInsensitiveContains(query) || $0.body.localizedCaseInsensitiveContains(query)) }
                 .map { snippet in
                     var entry = ClipEntry(kind: .text, text: snippet.body, source: snippet.title, payload: [])
                     entry.id = snippet.id; entry.group = snippet.group; return entry
@@ -44,6 +44,10 @@ final class ClipboardPanelState: ObservableObject {
         let filter: ClipKind? = kind == "文字" ? .text : kind == "图片" ? .image : kind == "文件" ? .files : nil
         return service.entries.filter { ClipboardPanelRules.matches($0, query: query, kind: filter, group: group) }
     }
+    var groups: [String] {
+        snippets ? ["全部"] + Set(service.snippets.map(\.group)).filter { $0 != "全部" }.sorted() : service.groups
+    }
+    func modeChanged() { group = "全部"; kind = "全部类型"; feedback = ""; copiedID = nil; selectedID = items.first?.id }
     var selected: ClipEntry? { items.first { $0.id == selectedID } ?? items.first }
     func reset(snippets: Bool) { self.snippets = snippets; query = ""; group = "全部"; kind = "全部类型"; selectedID = items.first?.id; searchFocused = false; feedback = ""; copiedID = nil }
     func reconcile() { if !items.contains(where: { $0.id == selectedID }) { selectedID = items.first?.id } }

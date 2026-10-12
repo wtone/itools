@@ -127,12 +127,21 @@ final class ClipboardService: ObservableObject {
         saveQueue.async { do { try Storage.save(snapshot, "clipboard.json") } catch { NoticeCenter.shared.report(error) } }
     }
     func flush() { saveQueue.sync {} }
-    func saveSnippet(title: String, body: String, group: String) {
-        guard !title.trimmingCharacters(in: .whitespaces).isEmpty, !body.isEmpty else { return }
-        snippets.append(Snippet(title: title, body: body, group: group))
-        NoticeCenter.shared.perform { try Storage.save(snippets, "snippets.json") }
+    @discardableResult func saveSnippet(title: String, body: String, group: String) -> Bool {
+        let title = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let group = group.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !title.isEmpty, !body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
+        let next = snippets + [Snippet(title: title, body: body, group: group.isEmpty ? "未分组" : group)]
+        do {
+            try Storage.save(next, "snippets.json"); snippets = next
+            NoticeCenter.shared.success("快捷短语已保存"); return true
+        } catch { NoticeCenter.shared.report(error); return false }
     }
-    func removeSnippet(_ id: UUID) { snippets.removeAll { $0.id == id }; NoticeCenter.shared.perform { try Storage.save(snippets, "snippets.json") } }
+    func removeSnippet(_ id: UUID) {
+        let next = snippets.filter { $0.id != id }
+        do { try Storage.save(next, "snippets.json"); snippets = next }
+        catch { NoticeCenter.shared.report(error) }
+    }
     @discardableResult func useSnippet(_ snippet: Snippet, paste: Bool) -> Bool {
         let expanded = snippet.expanded(clipboard: NSPasteboard.general.string(forType: .string) ?? "")
         let prepare = {

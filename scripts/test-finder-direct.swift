@@ -20,6 +20,7 @@ guard NSRunningApplication.runningApplications(withBundleIdentifier: "app.itools
 var launched: NSRunningApplication?
 var firstPID: Int?
 var count = 0
+var reportedDiscovery = false
 func pump(_ seconds: TimeInterval) { RunLoop.main.run(until: Date().addingTimeInterval(seconds)) }
 func finish(_ message: String, _ code: Int32) -> Never {
     if let app = launched, !app.isTerminated {
@@ -46,11 +47,18 @@ func deliver(_ urls: [URL]) {
         guard process.terminationStatus == 0,
               let result = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               result["sandboxDeniedWrite"] as? Bool == true,
+              result["discoveredWorker"] as? String == worker.path,
               let pid = result["pid"] as? Int32, pid != 0,
               let app = NSRunningApplication(processIdentifier: pid) else {
             finish("FAIL: sandbox delivery: " + String(decoding: data, as: UTF8.self), 2)
         }
         launched = app
+        if !reportedDiscovery {
+            let hostReadable = result["hostReadable"] ?? "unknown"
+            let workerReadable = result["workerReadable"] ?? "unknown"
+            print("PASS: production host discovery in sandbox; legacy host/worker readable = \(hostReadable) / \(workerReadable)")
+            reportedDiscovery = true
+        }
         return
     }
     let config = NSWorkspace.OpenConfiguration(); config.activates = false; config.addsToRecentItems = false

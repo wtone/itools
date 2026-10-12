@@ -24,6 +24,7 @@ struct MonitorSnapshot {
     var upload: Double = 0
     var uptime: TimeInterval = 0
     var cpuTemperature: Double?
+    var cpuTemperatureIsCoreMaximum = false
     var batteryTemperature: Double?
     var fan: Double?
     var fan2: Double?
@@ -44,7 +45,7 @@ final class MonitorService: ObservableObject {
     private var previous: ITSystemSample?
     private var previousTime: TimeInterval?
     private var tick = 0
-    private var sensors = ITSensorSample(cpu_temperature: .nan, battery_temperature: .nan, fan_rpm: .nan, second_fan_rpm: .nan)
+    private var sensors = ITSensorSample(cpu_temperature: .nan, battery_temperature: .nan, fan_rpm: .nan, second_fan_rpm: .nan, cpu_core_max: 0)
     init() { enabled = UserDefaults.standard.object(forKey: "monitor.enabled") as? Bool ?? true }
     func start() { configure() }
     func stop() { timer?.cancel(); timer = nil }
@@ -93,6 +94,7 @@ final class MonitorService: ObservableObject {
         if tick % 5 == 0 { sensors = it_sensor_sample() }
         tick += 1
         result.cpuTemperature = sensors.cpu_temperature.isFinite ? sensors.cpu_temperature : nil
+        result.cpuTemperatureIsCoreMaximum = sensors.cpu_core_max == 1
         result.batteryTemperature = sensors.battery_temperature.isFinite ? sensors.battery_temperature : nil
         result.fan = sensors.fan_rpm.isFinite && sensors.fan_rpm >= 0 ? sensors.fan_rpm : nil
         result.fan2 = sensors.second_fan_rpm.isFinite && sensors.second_fan_rpm >= 0 ? sensors.second_fan_rpm : nil

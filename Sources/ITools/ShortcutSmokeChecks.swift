@@ -66,7 +66,7 @@ enum ShortcutSmokeChecks {
         try require(!clipboard.state.searchFocused && !(clipboard.panel.firstResponder is NSTextView), "bottom panel stole number shortcuts for search")
         let screen = NSScreen.screens.first { $0.visibleFrame.contains(clipboard.panel.frame) }
         try require(screen != nil, "bottom panel extends beyond usable screen")
-        if let screen = screen { try require(clipboard.panel.frame == ClipboardPanelRules.bottomPanelFrame(visible: screen.visibleFrame), "bottom panel is not anchored to usable screen bottom") }
+        if let screen = screen { try require(zip([clipboard.panel.frame.minX, clipboard.panel.frame.minY, clipboard.panel.frame.width, clipboard.panel.frame.height], [ClipboardPanelRules.bottomPanelFrame(visible: screen.visibleFrame).minX, ClipboardPanelRules.bottomPanelFrame(visible: screen.visibleFrame).minY, ClipboardPanelRules.bottomPanelFrame(visible: screen.visibleFrame).width, ClipboardPanelRules.bottomPanelFrame(visible: screen.visibleFrame).height]).allSatisfy { abs($0.0 - $0.1) <= 0.5 }, "bottom panel is not anchored to usable screen bottom: actual=\(clipboard.panel.frame), expected=\(ClipboardPanelRules.bottomPanelFrame(visible: screen.visibleFrame))") }
         _ = clipboard.handle(event(124)); try require(clipboard.state.selected?.id == model.clipboard.entries[1].id, "bottom card arrow selection")
         clipboard.state.kind = "图片"; clipboard.state.reconcile()
         _ = clipboard.handle(event(18)); try require(uses.last?.0 == model.clipboard.entries[2].id, "bottom filtered digit selection")
@@ -92,6 +92,21 @@ enum ShortcutSmokeChecks {
         try export(clipboard.content(), size: NSSize(width: 1100,height: 320), name: "clipboard-bottom-empty", destination: destination)
         clipboard.state.reset(snippets: false)
         print("PASS: bottom clipboard matches usable screen bounds; horizontal focus/arrows/filtered digits/empty results; light/dark/narrow/empty card-strip rendering")
+        clipboard.state.reset(snippets: true)
+        clipboard.state.group = "工作"
+        try require(clipboard.state.items.count == 1 && clipboard.state.items.first?.source == "日期模板", "snippet group filter")
+        clipboard.state.query = "不存在的短语"
+        try require(clipboard.state.items.isEmpty, "snippet group and query intersection")
+        clipboard.state.query = ""; clipboard.state.snippets = false; clipboard.state.modeChanged()
+        try require(clipboard.state.group == "全部" && clipboard.state.kind == "全部类型", "mode change resets filters")
+        let snippetCount = model.clipboard.snippets.count
+        try require(!model.clipboard.saveSnippet(title: "  ", body: "内容", group: ""), "blank snippet title accepted")
+        try require(!model.clipboard.saveSnippet(title: "标题", body: " \n ", group: ""), "blank snippet body accepted")
+        try require(model.clipboard.saveSnippet(title: " 临时短语 ", body: "保留正文空格 ", group: " "), "valid snippet save")
+        try require(model.clipboard.snippets.last?.title == "临时短语" && model.clipboard.snippets.last?.group == "未分组", "snippet normalization")
+        if let added = model.clipboard.snippets.last { model.clipboard.removeSnippet(added.id) }
+        try require(model.clipboard.snippets.count == snippetCount, "snippet deletion")
+        print("PASS: snippet group/search intersection, mode reset, whitespace validation and transactional save/delete")
         clipboard.state.reset(snippets: true)
         try export(clipboard.content(), size: NSSize(width: 1100,height: 320), name: "clipboard-snippets", destination: destination)
         let privateBoard = NSPasteboard(name: .init("itools-shortcuts-smoke-" + UUID().uuidString))

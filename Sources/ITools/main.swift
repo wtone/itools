@@ -13,6 +13,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var shortcutGuideController: ShortcutGuideController?
     private let traditionalMenu = NSMenu()
     private var menuBarMonitor: MenuBarMonitor?
+    private var initializeMenuBarOnLeft = false
     private var menuActions: [Int: () -> Void] = [:]
     private var readyForOpenRequests = false
     private var queuedOpenURLs: [URL] = []
@@ -81,13 +82,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         model.performQuickAction = { [weak self] in self?.quickPanelController?.perform($0) }
         model.shortcuts.run = { [weak self] id in self?.model.performCommand(id) }
+        model.resetMenuBarPosition = { [weak self] in self?.restoreMenuBarPosition() }
         setupMainMenu(); setupStatusMenu()
-        menuBarMonitor = MenuBarMonitor(monitor: model.monitor, preferences: model.menuBar) { [weak self] button in self?.quickPanelController?.toggle(relativeTo: button) }
-        if !launchedAtLogin || smoke { showWindow() }
+        menuBarMonitor = MenuBarMonitor(monitor: model.monitor, preferences: model.menuBar, statusItem: status, initializeOnLeft: initializeMenuBarOnLeft)
+        if (!launchedAtLogin || smoke) && !ProcessInfo.processInfo.arguments.contains("--capture-editor-check") && !ProcessInfo.processInfo.arguments.contains("--menu-bar-display-check") { showWindow() }
         readyForOpenRequests = true
         let queued = queuedOpenURLs; queuedOpenURLs.removeAll()
         if !queued.isEmpty { application(NSApp, open: queued) }
         if smoke {
+            if ProcessInfo.processInfo.arguments.contains("--menu-bar-display-check") {
+                let destination = URL(fileURLWithPath: ProcessInfo.processInfo.environment["ITOOLS_SMOKE_OUTPUT"] ?? NSTemporaryDirectory() + "itools-menu-bar-test")
+                try? FileManager.default.createDirectory(at: destination, withIntermediateDirectories: true)
+                for metric in MenuBarMetric.allCases { model.menuBar.set(metric, enabled: true) }
+                model.monitor.start()
+                DispatchQueue.main.asyncAfter(deadline: .now() + 5) {
+                    do { try self.menuBarMonitor?.verifyAndExport(snapshot: self.model.monitor.snapshot, destination: destination) }
+                    catch { print("FAIL: \(error.localizedDescription)"); exit(7) }
+                    var remaining = 30
+                    func checkLiveRefresh() {
+                        do { try self.menuBarMonitor?.verifyCurrentDisplay() }
+                        catch { print("FAIL: \(error.localizedDescription)"); exit(7) }
+                        remaining -= 1
+                        if remaining == 0 {
+                            print("PASS: primary-only compositor placement and button anchor across 30 live refresh checks")
+                            NSApp.terminate(nil)
+                        } else { DispatchQueue.main.asyncAfter(deadline: .now() + 0.1, execute: checkLiveRefresh) }
+                    }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.2, execute: checkLiveRefresh)
+                }
+                return
+            }
             if ProcessInfo.processInfo.arguments.contains("--clipboard-focus-test") {
                 // Run the panel's real responder checks after the launch transaction settles.
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
@@ -155,10 +179,38 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         editMenu.addItem(withTitle: "复制", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
         editMenu.addItem(withTitle: "粘贴", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
         editMenu.addItem(withTitle: "全选", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
-        edit.submenu = editMenu; main.addItem(edit); NSApp.mainMenu = main
+        edit.submenu = editMenu; main.addItem(edit)
+        let viewItem = NSMenuItem(title: "显示", action: nil, keyEquivalent: "")
+        let viewMenu = NSMenu(title: "显示")
+        for (index, page) in ToolPage.allCases.enumerated() {
+            let item = NSMenuItem(title: page.rawValue, action: #selector(navigatePage(_:)), keyEquivalent: String(index + 1))
+            item.target = self; item.tag = index; viewMenu.addItem(item)
+        }
+        viewItem.submenu = viewMenu; main.addItem(viewItem); NSApp.mainMenu = main
+    }
+    @objc private func navigatePage(_ sender: NSMenuItem) {
+        guard ToolPage.allCases.indices.contains(sender.tag) else { return }
+        model.navigate(ToolPage.allCases[sender.tag])
+    }
+    private func restoreMenuBarPosition() {
+        guard !ProcessInfo.processInfo.arguments.contains("--smoke-test") else { return }
+        quickPanelController?.close()
+        menuBarMonitor?.restoreDefaultPosition()
+        NoticeCenter.shared.success("iTools 已移到状态图标区靠左的可见位置")
     }
     private func setupStatusMenu() {
-        status = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        let smoke = ProcessInfo.processInfo.arguments.contains("--smoke-test")
+        let name = smoke ? "iTools.smoke." + UUID().uuidString : "iTools.metrics"
+        // Assign a fresh temporary slot before the first native layout in checks.
+        // Normal launches preserve the position saved by the user's Cmd-drag.
+        let key = "NSStatusItem Preferred Position " + name
+        if smoke, ProcessInfo.processInfo.arguments.contains("--menu-bar-notch-check"),
+           let right = NSScreen.screens.first?.auxiliaryTopRightArea {
+            UserDefaults.standard.set(right.width + 63, forKey: key)
+        }
+        initializeMenuBarOnLeft = MenuBarDisplayScope.prepareAutosave(name)
+        status = MenuBarDisplayScope.makeStatusItem(length: NSStatusItem.variableLength)
+        status.autosaveName = name
         status.button?.image = NSImage(systemSymbolName: "square.stack.3d.up", accessibilityDescription: "iTools 工具箱")
         status.button?.font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular)
         traditionalMenu.delegate = self
@@ -167,9 +219,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         status.button?.toolTip = "iTools 快捷面板 · 右键打开文字菜单"
     }
     @objc private func statusClicked(_ sender: NSStatusBarButton) {
+        // Reject stale native events from a display removed/rearranged during a click.
+        if let event = NSApp.currentEvent, [.leftMouseUp, .rightMouseUp].contains(event.type),
+           !MenuBarDisplayScope.isPrimaryScreen(NSEvent.mouseLocation) { return }
         if NSApp.currentEvent?.type == .rightMouseUp {
             quickPanelController?.close()
-            traditionalMenu.popUp(positioning: nil, at: NSPoint(x: 0, y: sender.bounds.minY - 4), in: sender)
+            if let rect = MenuBarDisplayScope.buttonScreenRect(sender) {
+                traditionalMenu.popUp(positioning: nil, at: NSPoint(x: rect.minX, y: rect.minY - 4), in: nil)
+            } else {
+                traditionalMenu.popUp(positioning: nil, at: NSPoint(x: 0, y: sender.bounds.minY - 4), in: sender)
+            }
         } else { quickPanelController?.toggle(relativeTo: sender) }
     }
     func menuWillOpen(_ menu: NSMenu) {
@@ -213,6 +272,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func application(_ application: NSApplication, open urls: [URL]) {
         guard readyForOpenRequests else { queuedOpenURLs.append(contentsOf: urls.prefix(20)); return }
         for url in urls {
+            if let message = FinderLaunchFailure.message(in: url) {
+                model.navigate(.files); NoticeCenter.shared.report(UserFacingError(message)); continue
+            }
             if url.scheme == "itools" {
                 guard model.filesEnabled else { model.navigate(.settings); continue }
                 model.files.receive(url); model.navigate(.files)
@@ -252,10 +314,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if model.recorder.isActive {
             NoticeCenter.shared.report(UserFacingError("录制尚未保存，请先停止录制后再退出。")); showWindow(); return .terminateCancel
         }
+        if model.recorder.converting {
+            NoticeCenter.shared.report(UserFacingError("视频仍在导出，请等待完成后再退出。")); showWindow(); return .terminateCancel
+        }
         if model.files.working {
             NoticeCenter.shared.report(UserFacingError("文件任务尚未完成，请完成任务或停止扫描后再退出。")); showWindow(); return .terminateCancel
         }
-        quickPanelController?.close(); clipboardPanelController?.close(); shortcutGuideController?.close(); menuBarMonitor?.stop(); model.stop(); return .terminateNow
+        model.capture.cancelRegionCapture(); model.capture.cancelLongCapture()
+        quickPanelController?.close(); clipboardPanelController?.close(); shortcutGuideController?.close(); menuBarMonitor?.stop(); model.stop()
+        if ProcessInfo.processInfo.arguments.contains("--smoke-test"), let name = status?.autosaveName {
+            NSStatusBar.system.removeStatusItem(status)
+            for key in UserDefaults.standard.dictionaryRepresentation().keys where key.contains(name) { UserDefaults.standard.removeObject(forKey: key) }
+        }
+        return .terminateNow
     }
     private func runSmokeTest() {
         let directory = ProcessInfo.processInfo.environment["ITOOLS_SMOKE_OUTPUT"] ?? NSTemporaryDirectory() + "itools-smoke"
@@ -269,8 +340,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 ClipEntry(kind: .text, text: "快捷键与操作指南：查看分组、修改快捷键。", source: "iTools 界面样例", payload: [])
             ]
         } else {
+            if ProcessInfo.processInfo.arguments.contains("--capture-editor-check") { model.showWindow = nil; model.capture.onShow = nil }
             do { try SmokeChecks.run(model: model, destination: destination) }
             catch { print("FAIL: \(error.localizedDescription)"); exit(5) }
+            if ProcessInfo.processInfo.arguments.contains("--capture-editor-check") { NSApp.terminate(nil); return }
         }
         for metric in MenuBarMetric.allCases { model.menuBar.set(metric, enabled: true) }
         // Read system counters only; never request permissions or read clipboard content.

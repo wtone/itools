@@ -38,7 +38,7 @@ final class QuickPanelController: NSObject, NSWindowDelegate {
         if isShown { close(); return }
         // Capture the pointer before refresh/focus changes. A mirrored status item's window.screen is not reliable.
         let pointer = NSEvent.mouseLocation
-        let buttonRect = fromClick ? button.window?.convertToScreen(button.convert(button.bounds, to: nil)) : nil
+        let buttonRect = fromClick ? MenuBarDisplayScope.buttonScreenRect(button) : nil
         guard let placement = MenuPanelPlacement.resolve(pointer: pointer, screens: Self.screens, buttonRect: buttonRect) else { return }
         show(at: placement)
     }

@@ -9,6 +9,15 @@ import AppKit
         guard args.count >= 4 else { fatalError("sender worker.app output-directory request-url...") }
         _ = NSApplication.shared
         let worker = URL(fileURLWithPath: args[1])
+        let host = worker.deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let extensionURL = host.appendingPathComponent("Contents/PlugIns/IToolsFinder.appex")
+        let candidates = FinderHostLocation.launchCandidates(extensionURL: extensionURL,
+            registeredHost: NSWorkspace.shared.urlForApplication(withBundleIdentifier: FinderHostLocation.bundleID))
+        guard let chosen = candidates.first, FinderHostLocation.worker(in: chosen).standardizedFileURL == worker.standardizedFileURL else {
+            fatalError("Production extension discovery did not select the requested worker")
+        }
+        let hostReadable = FinderHostLocation.isHost(host)
+        let workerReadable = FinderHostLocation.isWorker(worker)
         let output = URL(fileURLWithPath: args[2])
         // Prove the sender actually has filesystem sandbox restrictions, rather
         // than just inspecting its signature's entitlements.
@@ -23,18 +32,28 @@ import AppKit
             }
         }
         let urls = args.dropFirst(3).compactMap(URL.init(string:))
-        guard urls.count == args.count - 3, let config = FinderLaunchEvent.configuration(for: urls) else {
+        let failureOnly = urls.count == 1 && FinderLaunchFailure.message(in: urls[0]) != nil
+        guard urls.count == args.count - 3, failureOnly || FinderLaunchEvent.configuration(for: urls) != nil else {
             fatalError("Invalid test requests")
+        }
+        let config = FinderLaunchEvent.configuration(for: urls) ?? NSWorkspace.OpenConfiguration()
+        if failureOnly {
+            config.activates = true; config.addsToRecentItems = false
+            config.promptsUserIfNeeded = false; config.allowsRunningApplicationSubstitution = false
         }
         var done = false
         var result: [String: Any] = ["error": "Launch timed out"]
-        NSWorkspace.shared.openApplication(at: worker, configuration: config) { app, error in
+        let completion: (NSRunningApplication?, Error?) -> Void = { app, error in
             DispatchQueue.main.async {
                 result = ["pid": app?.processIdentifier ?? 0, "sandboxDeniedWrite": true,
+                          "hostReadable": hostReadable, "workerReadable": workerReadable,
+                          "discoveredWorker": FinderHostLocation.worker(in: chosen).path,
                           "error": error.map { String(describing: $0) } ?? ""]
                 done = true
             }
         }
+        if failureOnly { NSWorkspace.shared.open(urls, withApplicationAt: chosen, configuration: config, completionHandler: completion) }
+        else { NSWorkspace.shared.openApplication(at: FinderHostLocation.worker(in: chosen), configuration: config, completionHandler: completion) }
         let deadline = Date().addingTimeInterval(20)
         while !done && Date() < deadline { RunLoop.main.run(until: Date().addingTimeInterval(0.05)) }
         let data = try! JSONSerialization.data(withJSONObject: result, options: [.sortedKeys])

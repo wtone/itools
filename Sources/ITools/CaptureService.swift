@@ -12,6 +12,8 @@ final class CaptureService: ObservableObject {
     @Published var busy = false
     @Published var recent: [URL] = []
     @Published var pickedColor = ""
+    private var scrollingController: ScrollingCaptureController?
+    private var regionController: RegionCaptureController?
     private var process: Process?
     private var pins: [NSWindow] = []
     var onShow: (() -> Void)?
@@ -24,7 +26,24 @@ final class CaptureService: ObservableObject {
     }
     func capture(fullScreen: Bool = false, delay: Int = 0, ocr: Bool = false) {
         guard !busy, Permissions.requireScreen() else { return }
-        busy = true; NSApp.hide(nil)
+        guard !RegionSelector.shared.isSelecting else { NoticeCenter.shared.success("请先完成当前区域选择"); return }
+        let restoreWindow = NSApp.windows.contains { $0.isVisible && $0.canBecomeMain }
+        busy = true
+        if !fullScreen {
+            let controller = RegionCaptureController(); regionController = controller
+            controller.begin(delay: delay) { [weak self] result in
+                guard let self = self else { return }
+                self.regionController = nil; self.busy = false
+                guard let result = result else { NoticeCenter.shared.success("已取消截图，原图片和剪贴板保留"); return }
+                do {
+                    try self.acceptRegionCapture(result)
+                    if restoreWindow || ocr { self.onShow?() }
+                    if ocr { self.recognize() }
+                } catch { self.document = result; self.onShow?(); NoticeCenter.shared.report(error) }
+            }
+            return
+        }
+        NSApp.hide(nil)
         DispatchQueue.main.asyncAfter(deadline: .now() + Double(max(0, delay)) + 0.3) { [weak self] in
             guard let self = self else { return }
             do {
@@ -39,27 +58,67 @@ final class CaptureService: ObservableObject {
                         guard let self = self else { return }
                         self.process = nil; self.busy = false
                         if FileManager.default.fileExists(atPath: url.path), let image = NSImage(contentsOf: url) {
-                            self.document = AnnotationDocument(image: image); self.refreshRecent(); self.onShow?()
+                            guard self.acceptScreenshot(image) else { self.onShow?(); return }
+                            self.refreshRecent(); self.onShow?()
                             if ocr { self.recognize() }
-                            NoticeCenter.shared.success("截图已保存，可继续标注、贴图或复制")
+                            NoticeCenter.shared.success("截图已自动复制，可直接粘贴或继续标注")
                         } else if process.terminationStatus != 0 && process.terminationStatus != 1 {
                             self.onShow?(); NoticeCenter.shared.report(UserFacingError("截图失败，请检查屏幕录制权限后重试。"))
-                        } else { NoticeCenter.shared.success("已取消截图") }
+                        } else { if restoreWindow { self.onShow?() }; NoticeCenter.shared.success("已取消截图") }
                     }
                 }
                 try task.run()
-            } catch { self.busy = false; NoticeCenter.shared.report(error) }
+            } catch { self.process = nil; self.busy = false; self.onShow?(); NoticeCenter.shared.report(error) }
         }
     }
+    /// Preserve editable objects after finishing the overlay; only the saved/clipboard PNG is flattened.
+    func acceptRegionCapture(_ result: AnnotationDocument, pasteboard: NSPasteboard = .general) throws {
+        guard let image = result.render(), let data = image.png else { throw UserFacingError("无法生成截图，请重试。") }
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        try data.write(to: folder.appendingPathComponent("Shot-" + Self.timestamp() + ".png"), options: .atomic)
+        document = result; recognizedText = ""; refreshRecent()
+        guard copyImage(to: pasteboard) else { throw UserFacingError("截图已保存，但复制失败；可在编辑器重新复制。") }
+        NoticeCenter.shared.success("截图已保存并复制，标注仍可编辑")
+    }
+    func cancelRegionCapture() { regionController?.cancel() }
+    @discardableResult
+    func acceptScreenshot(_ image: NSImage, pasteboard: NSPasteboard = .general) -> Bool {
+        document = AnnotationDocument(image: image); recognizedText = ""
+        return copyImage(to: pasteboard)
+    }
+    func startLongCapture(automatic: Bool = true) {
+        guard !busy, Permissions.requireScreen() else { return }
+        busy = true
+        let controller = ScrollingCaptureController(); scrollingController = controller
+        controller.select(automatic: automatic) { [weak self] result in
+            guard let self = self else { return }
+            self.busy = false; self.scrollingController = nil
+            guard let result = result else { self.onShow?(); NoticeCenter.shared.success("已取消长截图，原图片和剪贴板保留"); return }
+            let image = result.image
+            guard self.acceptScreenshot(image) else { self.onShow?(); return }
+            do {
+                try FileManager.default.createDirectory(at: self.folder, withIntermediateDirectories: true)
+                guard let data = image.png else { throw UserFacingError("长图编码失败，可在编辑器重试导出。") }
+                try data.write(to: self.folder.appendingPathComponent((result.frames > 1 ? "Long-" : "Shot-") + Self.timestamp() + ".png"), options: .atomic)
+                self.refreshRecent()
+                NoticeCenter.shared.success(result.frames > 1 ? "长截图已保存并复制（\(result.frames) 段），可直接粘贴或继续标注" : "已保存并复制当前区域；尚未追加滚动画面")
+            } catch { NoticeCenter.shared.report(error) }
+            self.onShow?()
+        }
+    }
+    func cancelLongCapture() { scrollingController?.cancel() }
     func openImage(_ url: URL? = nil) {
+        guard !busy else { return }
         guard let file = url ?? Panels.chooseFiles(types: ["png", "jpg", "jpeg", "tiff", "heic", "gif"], multiple: false).first else { return }
         guard let image = NSImage(contentsOf: file), image.isValid else { NoticeCenter.shared.report(UserFacingError("无法打开这张图片。")); return }
         document = AnnotationDocument(image: image); recognizedText = ""; onShow?()
     }
-    func copyImage() {
-        guard let image = document.render(), let data = image.png else { return }
-        NSPasteboard.general.clearContents(); NSPasteboard.general.setData(data, forType: .png)
-        NoticeCenter.shared.success("已复制图片")
+    @discardableResult
+    func copyImage(to pasteboard: NSPasteboard = .general) -> Bool {
+        guard let image = document.render(), let data = image.png else { NoticeCenter.shared.report(UserFacingError("无法生成图片，请重试。")); return false }
+        pasteboard.clearContents()
+        guard pasteboard.setData(data, forType: .png) else { NoticeCenter.shared.report(UserFacingError("未能复制图片，请重试。")); return false }
+        NoticeCenter.shared.success("已复制图片"); return true
     }
     func exportImage() {
         guard let image = document.render(), let url = Panels.save(name: "iTools-" + Self.timestamp() + ".png", types: ["png", "jpg"]) else { return }
@@ -109,22 +168,74 @@ final class CaptureService: ObservableObject {
         }
     }
     func stitch() {
+        guard !busy else { return }
         let urls = Panels.chooseFiles(types: ["png", "jpg", "jpeg"])
         guard urls.count >= 2 else { return }
         let images = urls.sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending }.compactMap { NSImage(contentsOf: $0) }
         guard images.count == urls.count else { NoticeCenter.shared.report(UserFacingError("有图片无法打开。")); return }
+        NoticeCenter.shared.perform {
+            let image = try Self.stitchedImage(images)
+                document = AnnotationDocument(image: image); recognizedText = ""; onShow?()
+            NoticeCenter.shared.success("已按文件名顺序纵向拼接，可继续标注或导出")
+        }
+    }
+    static func stitchedImage(_ sources: [NSImage], removeOverlap: Bool = false) throws -> NSImage {
+        let images = sources.compactMap { AnnotationDocument(image: $0).image }
+        guard images.count == sources.count, images.count >= (removeOverlap ? 1 : 2) else { throw UserFacingError("请至少选择两张有效图片。") }
+        guard images.count <= 50, images.reduce(CGFloat(0), { $0 + $1.size.width * $1.size.height }) <= 80_000_000 else {
+            throw UserFacingError("长图过大，请完成当前长截图后分批截取。")
+        }
+        var overlaps = Array(repeating: 0, count: images.count)
+        if removeOverlap, images.count > 1 {
+            for index in 1..<images.count {
+                overlaps[index] = matchingOverlap(images[index - 1], images[index])
+            }
+        }
         let width = images.map { $0.size.width }.max() ?? 0
-        let height = images.reduce(CGFloat(0)) { $0 + $1.size.height }
-        guard width > 0, height > 0, width * height <= 80_000_000 else { NoticeCenter.shared.report(UserFacingError("拼接后的图片过大，请减少图片数量。")); return }
+        let height = images.enumerated().reduce(CGFloat(0)) { $0 + $1.element.size.height - CGFloat(overlaps[$1.offset]) }
+        guard width.isFinite, height.isFinite, width > 0, height > 0, width * height <= 80_000_000 else {
+            throw UserFacingError("拼接后的图片过大，请减少图片数量。")
+        }
         guard let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: Int(width), pixelsHigh: Int(height), bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0),
-              let context = NSGraphicsContext(bitmapImageRep: rep) else { return }
+              let context = NSGraphicsContext(bitmapImageRep: rep) else { throw UserFacingError("无法创建拼接图片，请检查可用内存。") }
         NSGraphicsContext.saveGraphicsState(); NSGraphicsContext.current = context
+        defer { NSGraphicsContext.restoreGraphicsState() }
+        NSColor.clear.setFill(); NSRect(x: 0, y: 0, width: width, height: height).fill(using: .copy)
         var y = height
-        for image in images { y -= image.size.height; image.draw(in: NSRect(x: 0, y: y, width: image.size.width, height: image.size.height)) }
-        NSGraphicsContext.restoreGraphicsState()
+        for (index, image) in images.enumerated() {
+            let visibleHeight = image.size.height - CGFloat(overlaps[index])
+            guard visibleHeight > 0 else { continue }
+            y -= visibleHeight
+            image.draw(in: NSRect(x: 0, y: y, width: image.size.width, height: visibleHeight),
+                       from: NSRect(x: 0, y: 0, width: image.size.width, height: visibleHeight), operation: .sourceOver, fraction: 1)
+        }
         let image = NSImage(size: NSSize(width: width, height: height)); image.addRepresentation(rep)
-        document = AnnotationDocument(image: image); onShow?()
-        NoticeCenter.shared.success("已按文件名顺序纵向拼接，可继续标注或导出")
+        return image
+    }
+    /// Match exact screen pixels; ambiguous or changing content is kept rather than discarded.
+    private static func matchingOverlap(_ previous: NSImage, _ next: NSImage) -> Int {
+        guard let a = previous.cgImage(forProposedRect: nil, context: nil, hints: nil),
+              let b = next.cgImage(forProposedRect: nil, context: nil, hints: nil), a.width == b.width else { return 0 }
+        func pixels(_ image: CGImage) -> [UInt8]? {
+            var bytes = [UInt8](repeating: 0, count: image.width * image.height * 4)
+            let ok = bytes.withUnsafeMutableBytes { buffer -> Bool in
+                guard let context = CGContext(data: buffer.baseAddress, width: image.width, height: image.height,
+                                              bitsPerComponent: 8, bytesPerRow: image.width * 4,
+                                              space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return false }
+                context.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height)); return true
+            }
+            return ok ? bytes : nil
+        }
+        guard let left = pixels(a), let right = pixels(b) else { return 0 }
+        let row = a.width * 4
+        for overlap in stride(from: min(a.height, b.height), through: 32, by: -1) {
+            let start = (a.height - overlap) * row
+            // First/last rows cheaply reject non-matches; full comparison prevents false deduplication.
+            guard left[start..<start + row].elementsEqual(right[0..<row]),
+                  left[(a.height - 1) * row..<a.height * row].elementsEqual(right[(overlap - 1) * row..<overlap * row]) else { continue }
+            if left[start..<a.height * row].elementsEqual(right[0..<overlap * row]) { return overlap }
+        }
+        return 0
     }
     static func timestamp() -> String { let f = DateFormatter(); f.dateFormat = "yyyyMMdd-HHmmss-SSS"; return f.string(from: Date()) }
 }

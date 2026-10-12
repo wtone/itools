@@ -13,10 +13,12 @@ struct CapturePage: View {
             if tab == 0 {
                 HStack {
                     Button { capture.capture() } label: { Label("区域截图", systemImage: "viewfinder") }.buttonStyle(.borderedProminent)
+                    Button("长截图") { capture.startLongCapture() }.help("在任意显示器框选滚动内容，选区透明，周围保留灰色蒙层")
                     Button("全屏") { capture.capture(fullScreen: true) }
                     Button("延时 3 秒") { capture.capture(delay: 3) }
                     Button("打开图片") { capture.openImage() }
                     Menu("更多") {
+                        Button("手动滚动长截图") { capture.startLongCapture(automatic: false) }
                         Button("纵向拼接图片（按文件名排序）") { capture.stitch() }
                         Button("取色并复制 HEX") { capture.pickColor() }
                         Button("打开截图文件夹") {
@@ -28,6 +30,8 @@ struct CapturePage: View {
                     }.frame(width: 85)
                     if capture.busy { ProgressView().controlSize(.small) }
                 }.disabled(capture.busy)
+                Text("区域截图先框选，再拖动边缘调整大小、移动选区或直接标注；点击「完成并复制」保存到剪贴板。长截图可在任意显示器框选，蒙层持续保留。")
+                    .font(.system(size: 11)).foregroundColor(.secondary)
                 if capture.document.image != nil { EditorView(capture: capture, document: capture.document).padding(16).instrumentSurface() }
                 else { EmptyState(icon: "viewfinder", title: "从一张截图开始", detail: "拖动选择区域，按空格选择窗口，Esc 取消。也可以打开已有图片进行标注。") }
                 if !capture.recognizedText.isEmpty {
@@ -66,26 +70,71 @@ struct CapturePage: View {
 struct EditorView: View {
     @ObservedObject var capture: CaptureService
     @ObservedObject var document: AnnotationDocument
+    @State private var zoom = 1.0
+    @ViewBuilder private var historyControls: some View {
+        if document.editingTextID == nil {
+            Button("撤销") { document.undo() }.disabled(!document.canUndo).keyboardShortcut("z", modifiers: .command)
+            Button("重做") { document.redo() }.disabled(!document.canRedo).keyboardShortcut("z", modifiers: [.command, .shift])
+        } else {
+            Button("撤销") { document.undo() }.disabled(!document.canUndo)
+            Button("重做") { document.redo() }.disabled(!document.canRedo)
+        }
+    }
+    private var tools: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    ForEach(MarkTool.allCases) { tool in
+                        Button { document.tool = tool; if tool != .select { document.select(nil) } } label: {
+                            Group {
+                                if tool == .text { Text("T").font(.system(size: 17, weight: .semibold, design: .serif)) }
+                                else { Image(systemName: tool.icon) }
+                            }.frame(width: 25, height: 23)
+                                .foregroundColor(document.interactionTool == tool ? accent : .primary)
+                        }.help(tool.rawValue).accessibilityLabel(tool.rawValue)
+                    }
+                }
+            }
+            .frame(height: 36)
+    }
+    private var styleControls: some View {
+        HStack(spacing: 12) {
+                ColorPicker("颜色", selection: $document.color).labelsHidden().frame(width: 36)
+                    .onChange(of: document.color) { _ in document.applyStyle() }
+                Slider(value: $document.lineWidth, in: 2...30, onEditingChanged: { editing in if !editing { document.applyStyle() } })
+                    .frame(width: 95).help(document.selected?.tool == .text ? "文字大小" : "线条粗细")
+                Text(document.selected?.tool.rawValue ?? "新标注").font(.system(size: 11)).foregroundColor(.secondary)
+                Spacer()
+                Button("删除") { document.deleteSelected() }.disabled(document.selected == nil)
+                historyControls
+            }.controlSize(.small)
+    }
     var body: some View {
         VStack(alignment: .leading, spacing: 11) {
-            HStack(spacing: 9) {
-                ForEach(MarkTool.allCases) { tool in
-                    Button { document.tool = tool } label: { Image(systemName: tool.icon).frame(width: 25, height: 23).foregroundColor(document.tool == tool ? accent : .primary) }
-                        .help(tool.rawValue).accessibilityLabel(tool.rawValue)
+            tools
+            styleControls
+            Text("悬停标注即可拖动，控制点调整大小；双击文字直接编辑，点击其他位置保存。⌘Z 撤销，⇧⌘Z 重做。")
+                .font(.system(size: 11)).foregroundColor(.secondary)
+            GeometryReader { geometry in
+                ScrollView([.horizontal, .vertical]) {
+                    AnnotationCanvas(document: document)
+                        .frame(width: geometry.size.width * zoom,
+                               height: max(335, (geometry.size.width - 28) * (document.image?.size.height ?? 1) / max(1, document.image?.size.width ?? 1)) * zoom)
                 }
-                ColorPicker("颜色", selection: $document.color).labelsHidden().frame(width: 36)
-                Slider(value: $document.lineWidth, in: 2...16).frame(width: 75).help("标注粗细")
-                Spacer(); Button("撤销") { document.undo() }.disabled(document.marks.isEmpty)
-            }
-            AnnotationCanvas(document: document).frame(height: 335).cornerRadius(6)
+            }.frame(height: 335).cornerRadius(6)
                 .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.secondary.opacity(0.18)))
             HStack {
-                Text(document.tool.rawValue + "工具").font(.system(size: 11)).foregroundColor(.secondary)
+                Text(document.editingTextID != nil ? "正在编辑文字 · 点击其他位置保存 · Esc 取消" : document.interactionTool.rawValue + "工具").font(.system(size: 11)).foregroundColor(.secondary)
+                Slider(value: $zoom, in: 1...3).frame(width: 75).help("放大图片以精确标注")
+                Text("\(Int(zoom * 100))%").font(.system(size: 10)).monospacedDigit()
+                Button("适合宽度") { zoom = 1 }.controlSize(.small)
+                Spacer()
+            }
+            HStack {
                 Spacer()
                 Button("OCR 识别") { capture.recognize() }.disabled(capture.busy)
                 Button("贴图") { capture.pin() }
-                Button("复制图片") { capture.copyImage() }
-                Button("导出…") { capture.exportImage() }.buttonStyle(.borderedProminent)
+                Button("完成并复制") { capture.copyImage() }.buttonStyle(.borderedProminent).disabled(capture.busy)
+                Button("导出…") { capture.exportImage() }
             }
         }
     }

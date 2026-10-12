@@ -105,10 +105,11 @@ struct FilesPage: View {
 struct MonitorPage: View {
     @ObservedObject var service: MonitorService
     @ObservedObject var menuPreferences: MenuBarPreferences
+    var restoreMenuPosition: (() -> Void)? = nil
     private var snapshot: MonitorSnapshot { service.snapshot }
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
-            MenuBarSettingsView(preferences: menuPreferences, monitor: service)
+            MenuBarSettingsView(preferences: menuPreferences, monitor: service, restorePosition: restoreMenuPosition)
             HStack {
                 Label(service.enabled ? "正在观察这台 Mac" : "监控已暂停，显示最后一次读数", systemImage: service.enabled ? "circle.fill" : "pause.circle").font(.system(size: 12)).foregroundColor(service.enabled ? .green : .secondary)
                 Spacer(); Toggle("状态监控", isOn: $service.enabled).toggleStyle(.switch).controlSize(.small)
@@ -141,15 +142,15 @@ struct MonitorPage: View {
             }.padding(20).instrumentSurface(tint: InterfaceStyle.violet)
             SectionBlock(title: "硬件与存储") {
                 HStack(spacing: 25) {
-                    MetricView(title: "CPU 温度", value: snapshot.cpuTemperature.map { String(format: "%.1f°C", $0) } ?? "不可用", detail: "Intel SMC · 只读")
+                    MetricView(title: "CPU 温度", value: snapshot.cpuTemperature.map { String(format: "%.1f°C", $0) } ?? "不可用", detail: snapshot.cpuTemperature == nil ? "暂未读到温度" : snapshot.cpuTemperatureIsCoreMaximum ? "核心最高温度 · SMC 只读" : "SMC · 只读")
                     MetricView(title: "风扇", value: snapshot.fan.map { String(format: "%.0f", $0) } ?? "不可用", detail: "RPM" + (snapshot.fan2.map { String(format: " · 第二风扇 %.0f", $0) } ?? ""))
                     MetricView(title: "磁盘可用", value: bytes(snapshot.diskFree), detail: "总容量 " + bytes(snapshot.diskTotal))
                 }
             }
             SectionBlock(title: "网络与交换空间") {
                 HStack(spacing: 25) {
-                    MetricView(title: "下载速率", value: bytes(UInt64(max(0, snapshot.download))) + "/s", detail: "物理网络接口汇总")
-                    MetricView(title: "上传速率", value: bytes(UInt64(max(0, snapshot.upload))) + "/s", detail: "排除回环与 VPN 重复计数")
+                    MetricView(title: "下载速率", value: MetricFormatting.rate(snapshot.networkAvailable ? snapshot.download : nil), detail: "物理网络接口汇总")
+                    MetricView(title: "上传速率", value: MetricFormatting.rate(snapshot.networkAvailable ? snapshot.upload : nil), detail: "排除回环与 VPN 重复计数")
                     MetricView(title: "交换空间", value: bytes(snapshot.swap), detail: "系统实际使用")
                 }
             }
@@ -244,19 +245,23 @@ struct UtilitiesPage: View {
             }.id("utility.link")
             SectionBlock(title: "文字转二维码", detail: "本地生成") {
                 HStack {
-                    TextField("文字或链接", text: $qrText).textFieldStyle(.roundedBorder)
+                    TextField("文字或链接", text: $qrText).textFieldStyle(.roundedBorder).onChange(of: qrText) { _ in qrImage = nil }
                     Button("生成") {
-                        let filter = CIFilter(name: "CIQRCodeGenerator")
-                        filter?.setValue(Data(qrText.utf8), forKey: "inputMessage")
-                        if let output = filter?.outputImage?.transformed(by: CGAffineTransform(scaleX: 8, y: 8)),
-                           let cg = CIContext().createCGImage(output, from: output.extent) { qrImage = NSImage(cgImage: cg, size: output.extent.size) }
+                        NoticeCenter.shared.perform { qrImage = try QRCodeRenderer.image(text: qrText) }
                     }.disabled(qrText.isEmpty || qrText.utf8.count > 2000)
                 }
+                Text("\(qrText.utf8.count) / 2000 字节 · 修改内容后请重新生成")
+                    .font(.system(size: 11)).foregroundColor(qrText.utf8.count > 2000 ? .red : .secondary)
                 if let image = qrImage {
                     HStack {
                         Image(nsImage: image).interpolation(.none).resizable().scaledToFit().frame(width: 170, height: 170)
-                        Button("复制二维码") { NSPasteboard.general.clearContents(); NSPasteboard.general.setData(image.png, forType: .png) }
-                        Button("保存…") { if let url = Panels.save(name: "二维码.png", types: ["png"]) { NoticeCenter.shared.perform { try image.png?.write(to: url) } } }
+                        Button("复制二维码") {
+                            guard let data = image.png else { NoticeCenter.shared.report(UserFacingError("二维码编码失败。")); return }
+                            NSPasteboard.general.clearContents()
+                            if NSPasteboard.general.setData(data, forType: .png) { NoticeCenter.shared.success("已复制二维码") }
+                            else { NoticeCenter.shared.report(UserFacingError("未能复制二维码，请重试。")) }
+                        }
+                        Button("保存…") { if let url = Panels.save(name: "二维码.png", types: ["png"]) { NoticeCenter.shared.perform { guard let data = image.png else { throw UserFacingError("二维码编码失败。") }; try data.write(to: url, options: .atomic); NoticeCenter.shared.success("二维码已保存") } } }
                     }
                 }
             }.id("utility.qr")

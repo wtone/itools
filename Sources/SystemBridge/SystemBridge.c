@@ -48,7 +48,7 @@ ITSystemSample it_system_sample(void) {
     return sample;
 }
 
-// The Intel AppleSMC user-client ABI is not a supported public sensor API.
+// AppleSMC's user-client ABI is not a supported public sensor API.
 // Only key-info (9) and read-bytes (5) commands are used. No writes/fan control.
 typedef struct { uint8_t major, minor, build, reserved; uint16_t release; } ITSMCVersion;
 typedef struct { uint16_t version, length; uint32_t cpu, gpu, memory; } ITSMCLimits;
@@ -57,26 +57,29 @@ typedef struct {
     uint32_t key; ITSMCVersion version; ITSMCLimits limits; ITSMCKeyInfo info;
     uint8_t result, status, command; uint32_t data; uint8_t bytes[32];
 } ITSMCMessage;
-_Static_assert(sizeof(ITSMCMessage) == 80, "Intel AppleSMC ABI must be 80 bytes");
+_Static_assert(sizeof(ITSMCMessage) == 80, "AppleSMC ABI must be 80 bytes");
 static uint32_t fourcc(const char *s) {
     return ((uint32_t)(uint8_t)s[0] << 24) | ((uint32_t)(uint8_t)s[1] << 16) | ((uint32_t)(uint8_t)s[2] << 8) | (uint8_t)s[3];
+}
+double it_sensor_decode(uint32_t type, const uint8_t *bytes, uint32_t size) {
+    if (!bytes) return NAN;
+    if (type == fourcc("sp78") && size == 2) return (double)(int16_t)((bytes[0] << 8) | bytes[1]) / 256.0;
+    if (type == fourcc("fpe2") && size == 2) return (double)((bytes[0] << 8) | bytes[1]) / 4.0;
+    if (type == fourcc("flt ") && size == 4) { float value; memcpy(&value, bytes, 4); return isfinite(value) ? value : NAN; }
+    return NAN;
 }
 static double read_value(io_connect_t connection, const char *key) {
     ITSMCMessage in = {0}, out = {0}; size_t length = sizeof(out);
     in.key = fourcc(key); in.command = 9;
-    if (IOConnectCallStructMethod(connection, 2, &in, sizeof(in), &out, &length) != KERN_SUCCESS || out.result) return NAN;
+    if (IOConnectCallStructMethod(connection, 2, &in, sizeof(in), &out, &length) != KERN_SUCCESS || length != sizeof(out) || out.result) return NAN;
     if (out.info.size == 0 || out.info.size > 32) return NAN;
     in.info = out.info; uint32_t type = out.info.type; in.command = 5;
     memset(&out, 0, sizeof(out)); length = sizeof(out);
-    if (IOConnectCallStructMethod(connection, 2, &in, sizeof(in), &out, &length) != KERN_SUCCESS || out.result) return NAN;
-    if (type == fourcc("sp78")) return (double)(int16_t)((out.bytes[0] << 8) | out.bytes[1]) / 256.0;
-    if (type == fourcc("fpe2")) return (double)((out.bytes[0] << 8) | out.bytes[1]) / 4.0;
-    if (type == fourcc("flt ")) { float value; memcpy(&value, out.bytes, 4); return isfinite(value) ? value : NAN; }
-    return NAN;
+    if (IOConnectCallStructMethod(connection, 2, &in, sizeof(in), &out, &length) != KERN_SUCCESS || length != sizeof(out) || out.result) return NAN;
+    return it_sensor_decode(type, out.bytes, in.info.size);
 }
 ITSensorSample it_sensor_sample(void) {
-    ITSensorSample result = {NAN, NAN, NAN, NAN};
-#if defined(__x86_64__)
+    ITSensorSample result = {NAN, NAN, NAN, NAN, 0};
     io_service_t service = IOServiceGetMatchingService(kIOMainPortDefault, IOServiceMatching("AppleSMC"));
     if (!service) return result;
     io_connect_t connection = IO_OBJECT_NULL;
@@ -87,10 +90,26 @@ ITSensorSample it_sensor_sample(void) {
         double value = read_value(connection, keys[i]);
         if (value > 0 && value < 130) { result.cpu_temperature = value; break; }
     }
-    double battery = read_value(connection, "TB0T");
-    if (battery > 0 && battery < 100) result.battery_temperature = battery;
-    result.fan_rpm = read_value(connection, "F0Ac"); result.second_fan_rpm = read_value(connection, "F1Ac");
-    IOServiceClose(connection);
+#if defined(__arm64__) || defined(__aarch64__)
+    char brand[128] = {0}; size_t brand_size = sizeof(brand) - 1;
+    if (!sysctlbyname("machdep.cpu.brand_string", brand, &brand_size, NULL, 0) && strstr(brand, "Apple M2")) {
+        // M2-family CPU core key addresses, validated on M2 Pro. Read only this
+        // CPU group: GPU/board/power keys must not be labelled as CPU temperature.
+        const char *core_keys[] = {"Tp01", "Tp05", "Tp09", "Tp0D", "Tp0X", "Tp0b", "Tp0f", "Tp0j", "Tp1h", "Tp1t", "Tp1p", "Tp1l"};
+        double hottest = NAN;
+        for (unsigned i = 0; i < sizeof(core_keys) / sizeof(core_keys[0]); i++) {
+            double value = read_value(connection, core_keys[i]);
+            if (value > 0 && value < 130 && (!isfinite(hottest) || value > hottest)) hottest = value;
+        }
+        if (isfinite(hottest)) { result.cpu_temperature = hottest; result.cpu_core_max = 1; }
+    }
 #endif
+    double battery = read_value(connection, "TB0T");
+    if (!isfinite(battery) || battery <= 0 || battery >= 100) battery = read_value(connection, "TB1T");
+    if (battery > 0 && battery < 100) result.battery_temperature = battery;
+    double fan = read_value(connection, "F0Ac"), fan2 = read_value(connection, "F1Ac");
+    if (isfinite(fan) && fan >= 0 && fan < 30000) result.fan_rpm = fan;
+    if (isfinite(fan2) && fan2 >= 0 && fan2 < 30000) result.second_fan_rpm = fan2;
+    IOServiceClose(connection);
     return result;
 }

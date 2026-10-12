@@ -25,13 +25,17 @@ final class NoticeCenter: ObservableObject {
 enum Storage {
     private static let lock = NSRecursiveLock()
     private static var unreadable = Set<String>()
+    private static let smokeRoot = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("itools-smoke-" + UUID().uuidString, isDirectory: true)
     static var root: URL {
         if ProcessInfo.processInfo.arguments.contains("--finder-direct-test"),
            let path = ProcessInfo.processInfo.environment["ITOOLS_FINDER_TEST_OUTPUT"] {
             return URL(fileURLWithPath: path).appendingPathComponent("State", isDirectory: true)
         }
         if ProcessInfo.processInfo.arguments.contains("--smoke-test") {
-            return URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("itools-smoke-data", isDirectory: true)
+            if let output = ProcessInfo.processInfo.environment["ITOOLS_SMOKE_OUTPUT"] {
+                return URL(fileURLWithPath: output).appendingPathComponent("State", isDirectory: true)
+            }
+            return smokeRoot
         }
         return FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("ITools", isDirectory: true)
     }

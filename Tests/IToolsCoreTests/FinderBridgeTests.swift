@@ -108,4 +108,29 @@ final class FinderBridgeTests: XCTestCase {
         XCTAssertNil(FinderHostLocation.resolve(extensionURL: stale, fallbacks: [installed], valid: { _ in false }))
         XCTAssertNil(FinderHostLocation.containingApplication(extensionURL: URL(fileURLWithPath: "/tmp/not-an-app/IToolsFinder.appex")))
     }
+    func testSandboxLaunchDoesNotRequireReadingHostOrWorker() {
+        let app = URL(fileURLWithPath: "/Users/test/projects/中文 工具/dist/iTools.app", isDirectory: true)
+        let ext = app.appendingPathComponent("Contents/PlugIns/IToolsFinder.appex")
+        // A denied filesystem preflight is not evidence that the host is missing.
+        XCTAssertNil(FinderHostLocation.resolve(extensionURL: ext, fallbacks: [], valid: { _ in false }))
+        XCTAssertEqual(FinderHostLocation.launchCandidates(extensionURL: ext, registeredHost: nil), [app])
+        XCTAssertEqual(FinderHostLocation.launchCandidates(extensionURL: ext, registeredHost: app), [app])
+        let installed = URL(fileURLWithPath: "/Applications/iTools.app", isDirectory: true)
+        XCTAssertEqual(FinderHostLocation.launchCandidates(extensionURL: ext, registeredHost: installed), [app, installed])
+        XCTAssertEqual(FinderHostLocation.launchCandidates(extensionURL: URL(fileURLWithPath: "/tmp/invalid.appex"), registeredHost: installed), [installed])
+        XCTAssertTrue(FinderHostLocation.launchCandidates(extensionURL: URL(fileURLWithPath: "/tmp/invalid.appex"), registeredHost: URL(string: "https://example.com/iTools.app")!).isEmpty)
+    }
+    func testLaunchFailureIsDisplayOnlyAndStrictlyParsed() {
+        let message = "无法启动：中文 空格 &action=delete #?"
+        let url = FinderLaunchFailure.makeURL(message)!
+        XCTAssertEqual(FinderLaunchFailure.message(in: url), message)
+        XCTAssertNil(FinderDirectRequest(url))
+        XCTAssertNil(FinderLaunchFailure.makeURL(""))
+        XCTAssertNil(FinderLaunchFailure.makeURL(String(repeating: "字", count: 1400)))
+        for value in [url.absoluteString + "&action=delete", url.absoluteString + "&message=extra",
+                      url.absoluteString + "#fragment", "itools://finder-error?message=",
+                      "itools://finder-error/extra?message=error", "itools://finder?action=copy-path&path=/tmp"] {
+            XCTAssertNil(FinderLaunchFailure.message(in: URL(string: value)!))
+        }
+    }
 }
