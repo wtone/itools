@@ -34,16 +34,14 @@ enum MenuBarRenderingSmokeChecks {
         snapshot.upload = 7100; snapshot.download = 18000; snapshot.cpuTemperature = 48.7
         snapshot.cpuTemperatureIsCoreMaximum = true; snapshot.fan = 0; snapshot.fan2 = 0
         let metrics: [MenuBarMetric] = [.cpu, .memory, .gpu, .disk, .network]
-        let width = 16 + metrics.reduce(CGFloat(0)) { $0 + MenuBarMonitor.metricGap + MenuBarMonitor.imageWidth(for: $1) }
-        guard width + 16 <= 282 else { throw UserFacingError("Smoke: common menu-bar metrics exceed compact width budget") }
+        let width = metrics.reduce(CGFloat(0)) { $0 + MenuBarMonitor.imageWidth(for: $1) } + CGFloat(metrics.count - 1) * MenuBarMonitor.metricGap
+        guard width + 16 <= 202 else { throw UserFacingError("Smoke: common menu-bar metrics exceed compact width budget") }
         let preview = NSImage(size: NSSize(width: width + 16, height: 34))
         preview.lockFocus(); NSColor.white.setFill(); NSRect(x: 0, y: 0, width: width + 16, height: 34).fill()
-        NSImage(systemSymbolName: "square.stack.3d.up", accessibilityDescription: nil)?.draw(in: NSRect(x: 8, y: 9, width: 16, height: 16))
-        var x: CGFloat = 8 + 16
+        var x: CGFloat = 8
         for metric in metrics {
-            x += MenuBarMonitor.metricGap
             let image = MenuBarMonitor.image(for: .make(metric, snapshot: snapshot, running: true), width: MenuBarMonitor.imageWidth(for: metric), metric: metric)
-            image.draw(in: NSRect(x: x, y: 6, width: image.size.width, height: 22)); x += image.size.width
+            image.draw(in: NSRect(x: x, y: 6, width: image.size.width, height: 22)); x += image.size.width + MenuBarMonitor.metricGap
         }
         preview.unlockFocus()
         guard let png = preview.png else { throw UserFacingError("Smoke: compact preview missing") }
@@ -52,6 +50,6 @@ enum MenuBarRenderingSmokeChecks {
               MenuBarReading.make(.temperature, snapshot: snapshot, running: true).top == "49°" else {
             throw UserFacingError("Smoke: real zero RPM or temperature incorrectly shown as unavailable")
         }
-        print("PASS: native equal column gaps; network rows share a left origin across rate widths; real zero RPM and temperature rendered")
+        print("PASS: compact grouped column gaps, no toolbox with enabled readings; network rows share a left origin across rate widths; real zero RPM and temperature rendered")
     }
 }

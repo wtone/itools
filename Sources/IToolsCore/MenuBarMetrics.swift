@@ -30,16 +30,31 @@ public enum MenuBarMetric: String, CaseIterable, Identifiable {
 }
 public final class MenuBarPreferences: ObservableObject {
     public static let key = "menuBar.enabledMetrics"
+    public static let orderKey = "menuBar.metricOrder"
     @Published public private(set) var enabledMetrics: Set<MenuBarMetric>
+    @Published public private(set) var metricOrder: [MenuBarMetric]
+    public var visibleMetrics: [MenuBarMetric] { metricOrder.filter { enabledMetrics.contains($0) } }
     private let defaults: UserDefaults
     private let persistChanges: Bool
     public init(defaults: UserDefaults = .standard, persistChanges: Bool = true) {
         self.defaults = defaults
         self.persistChanges = persistChanges
+        let storedOrder = defaults.stringArray(forKey: Self.orderKey) ?? []
+        var seen: Set<MenuBarMetric> = []
+        let known = storedOrder.compactMap(MenuBarMetric.init(rawValue:)).filter { seen.insert($0).inserted }
+        metricOrder = known + MenuBarMetric.allCases.filter { !seen.contains($0) }
         // Keep the previous CPU-only default. An explicitly empty selection must stay empty.
         if let stored = defaults.stringArray(forKey: Self.key) {
             enabledMetrics = Set(stored.compactMap(MenuBarMetric.init(rawValue:)))
         } else { enabledMetrics = [.cpu] }
+    }
+    public func move(_ metric: MenuBarMetric, to target: MenuBarMetric) {
+        guard metric != target, let from = metricOrder.firstIndex(of: metric),
+              let to = metricOrder.firstIndex(of: target) else { return }
+        var next = metricOrder
+        next.remove(at: from); next.insert(metric, at: to)
+        metricOrder = next
+        if persistChanges { defaults.set(next.map(\.rawValue), forKey: Self.orderKey) }
     }
     public func isEnabled(_ metric: MenuBarMetric) -> Bool { enabledMetrics.contains(metric) }
     public func set(_ metric: MenuBarMetric, enabled: Bool) {

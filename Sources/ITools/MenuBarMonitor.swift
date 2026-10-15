@@ -34,89 +34,75 @@ struct MenuBarReading {
     }
 }
 
-/// Each reading is a real native status item, with its own Cmd-drag and autosave slot.
+/// One native slot contains an ordered, contiguous group of readings.
 final class MenuBarMonitor {
-    static let metricGap: CGFloat = 16
-    private struct Entry {
-        let item: NSStatusItem
-        let scope: MenuBarDisplayScope
-    }
-    private var items: [MenuBarMetric: Entry] = [:]
+    static let metricGap: CGFloat = 4
     private var subscription: AnyCancellable?
     private let statusItem: NSStatusItem
+    private let preferences: MenuBarPreferences
+    private let toolboxImage: NSImage?
     private var displayScope: MenuBarDisplayScope!
-    private let placement = MenuBarItemPlacement()
+    private let interaction: MenuBarMetricsView
     private var checkingDisplayScope = false
-    private var initializeOnLeft: Bool
-    private var smokeNames: Set<String> = []
-    var activeMetrics: Set<MenuBarMetric> { Set(items.keys) }
-    private var nativeItems: [NSStatusItem] { [statusItem] + MenuBarMetric.allCases.compactMap { items[$0]?.item } }
-    init(monitor: MonitorService, preferences: MenuBarPreferences, statusItem: NSStatusItem, initializeOnLeft: Bool) {
-        self.statusItem = statusItem
-        self.initializeOnLeft = initializeOnLeft
-        statusItem.length = 16
-        statusItem.button?.imagePosition = .imageOnly
-        displayScope = makeScope(for: statusItem)
-        subscription = Publishers.CombineLatest3(monitor.$snapshot, monitor.$enabled, preferences.$enabledMetrics)
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] snapshot, running, selected in
-                self?.update(selected: selected, snapshot: snapshot, running: running)
+    private(set) var activeMetrics: Set<MenuBarMetric> = []
+    private var readings: [MenuBarMetric: MenuBarReading] = [:]
+    init(monitor: MonitorService, preferences: MenuBarPreferences, statusItem: NSStatusItem, initializeOnLeft: Bool,
+         click: @escaping (NSStatusBarButton, Bool) -> Void) {
+        self.statusItem = statusItem; self.preferences = preferences
+        toolboxImage = statusItem.button?.image
+        interaction = MenuBarMetricsView(button: statusItem.button!)
+        statusItem.button?.addSubview(interaction)
+        interaction.move = { [weak preferences] metric, target in preferences?.move(metric, to: target) }
+        interaction.click = { [weak statusItem] right in
+            guard let button = statusItem?.button else { return }; click(button, right)
+        }
+        subscription = Publishers.CombineLatest4(monitor.$snapshot, monitor.$enabled, preferences.$enabledMetrics, preferences.$metricOrder)
+            .debounce(for: .milliseconds(100), scheduler: DispatchQueue.main)
+            .sink { [weak self] snapshot, running, selected, order in
+                self?.update(metrics: order.filter { selected.contains($0) }, snapshot: snapshot, running: running)
             }
-        update(selected: preferences.enabledMetrics, snapshot: monitor.snapshot, running: monitor.enabled)
+        update(metrics: preferences.visibleMetrics, snapshot: monitor.snapshot, running: monitor.enabled)
+        displayScope = MenuBarDisplayScope(item: statusItem, initializeOnLeft: initializeOnLeft)
     }
-    private func makeScope(for item: NSStatusItem) -> MenuBarDisplayScope {
-        MenuBarDisplayScope(item: item, initializeOnLeft: false, placementRecovery: { [weak self] in
-            guard let self, !self.checkingDisplayScope, !self.placement.isPlacing else { return false }
-            self.restoreDefaultPosition(); return self.placement.isPlacing
-        })
-    }
-    private func update(selected: Set<MenuBarMetric>, snapshot: MonitorSnapshot, running: Bool) {
+    private func update(metrics: [MenuBarMetric], snapshot: MonitorSnapshot, running: Bool) {
         guard !checkingDisplayScope else { return }
-        var needsPlacement = initializeOnLeft
-        if selected != activeMetrics {
-            needsPlacement = needsPlacement || placement.isPlacing
-            placement.stop()
-        }
-        for metric in MenuBarMetric.allCases where !selected.contains(metric) {
-            if let entry = items.removeValue(forKey: metric) {
-                // Removal lets AppKit save this item's position for later re-enabling.
-                remove(entry)
+        activeMetrics = Set(metrics)
+        readings = Dictionary(uniqueKeysWithValues: metrics.map { ($0, MenuBarReading.make($0, snapshot: snapshot, running: running)) })
+        let images = metrics.map { Self.image(for: readings[$0]!, width: Self.imageWidth(for: $0), metric: $0) }
+        let width = metrics.isEmpty ? 16 : images.reduce(CGFloat(0)) { $0 + $1.size.width } + CGFloat(max(0, metrics.count - 1)) * Self.metricGap
+        let combined = NSImage(size: NSSize(width: width, height: 22), flipped: false) { [toolboxImage] _ in
+            if images.isEmpty { toolboxImage?.draw(in: NSRect(x: 0, y: 3, width: 16, height: 16)) }
+            var x: CGFloat = 0
+            for image in images {
+                image.draw(in: NSRect(x: x, y: 0, width: image.size.width, height: 22)); x += image.size.width + Self.metricGap
             }
+            return true
         }
-        for metric in MenuBarMetric.allCases where selected.contains(metric) {
-            if items[metric] == nil {
-                let name = (statusItem.autosaveName ?? "iTools.metrics") + "." + metric.rawValue
-                let key = "NSStatusItem Preferred Position " + name
-                let saved = UserDefaults.standard.object(forKey: key) as? NSNumber
-                let valid = NSScreen.screens.first.map { screen in
-                    saved.map { value in MenuBarPlacement.isSavedPositionUsable(value.doubleValue, screen: screen.frame, rightArea: screen.auxiliaryTopRightArea) } ?? false
-                } ?? false
-                if !valid { UserDefaults.standard.set(0, forKey: key); needsPlacement = true }
-                let item = MenuBarDisplayScope.makeStatusItem(length: Self.imageWidth(for: metric))
-                item.autosaveName = name
-                item.button?.target = statusItem.button?.target; item.button?.action = statusItem.button?.action
-                item.button?.sendAction(on: [.leftMouseUp, .rightMouseUp])
-                item.button?.imagePosition = .imageOnly
-                if valid, let saved {
-                    // Autosave assignment can update the registry without moving
-                    // the newly created compositor slot. Reinstall at that slot.
-                    _ = it_primary_status_item_set_position(Unmanaged.passUnretained(item).toOpaque(), saved.doubleValue)
-                }
-                items[metric] = Entry(item: item, scope: makeScope(for: item))
-                if ProcessInfo.processInfo.arguments.contains("--smoke-test") { smokeNames.insert(name) }
-            }
-            guard let entry = items[metric] else { continue }
-            let reading = MenuBarReading.make(metric, snapshot: snapshot, running: running)
-            entry.item.button?.image = Self.image(for: reading, width: Self.imageWidth(for: metric), metric: metric)
-            entry.item.button?.title = ""
-            entry.item.button?.toolTip = reading.tooltip
-            entry.item.button?.setAccessibilityLabel(metric.title)
-            entry.item.button?.setAccessibilityValue(reading.top + ", " + reading.bottom)
-            entry.scope.refresh()
+        combined.isTemplate = true
+        // Keep the same native slot and its insertion point when switches change.
+        // Only the contiguous content changes width; other apps cannot interleave.
+        let changedWidth = statusItem.length != width
+        let position = statusItem.autosaveName.map { UserDefaults.standard.double(forKey: "NSStatusItem Preferred Position " + $0) } ?? 0
+        if changedWidth { statusItem.length = width }
+        statusItem.button?.image = combined; statusItem.button?.title = ""
+        statusItem.button?.imagePosition = .imageOnly; statusItem.button?.toolTip = nil
+        statusItem.button?.setAccessibilityLabel(metrics.isEmpty ? "iTools 工具箱" : "iTools 系统指标")
+        statusItem.button?.setAccessibilityValue(metrics.map { "\($0.title)：\(readings[$0]!.top) \(readings[$0]!.bottom)" }.joined(separator: "，"))
+        var x: CGFloat = 0
+        var columns = metrics.map { metric -> MenuBarMetricsView.Column in
+            let width = Self.imageWidth(for: metric)
+            defer { x += width + Self.metricGap }
+            return .init(metric: metric, x: x, width: width, tooltip: readings[metric]!.tooltip + "\n拖动或按住 ⌘ 拖动，调整区域内顺序。")
         }
-        initializeOnLeft = false
-        displayScope.refresh()
-        if needsPlacement { restoreDefaultPosition() }
+        if metrics.isEmpty { columns = [.init(metric: nil, x: 0, width: 16, tooltip: "iTools 快捷面板 · 右键打开文字菜单")] }
+        interaction.update(columns)
+        if changedWidth {
+            // Rapid zero/nonzero transitions can leave the existing compositor
+            // window uninstalled although its registry remains visible. Reuse
+            // the same native insertion point and object after resizing.
+            _ = it_primary_status_item_set_position(Unmanaged.passUnretained(statusItem).toOpaque(), position)
+        }
+        displayScope?.refresh()
     }
     /// Keep the menu bar's geometry stable across percentage digits and network unit changes.
     static func imageWidth(for metric: MenuBarMetric) -> CGFloat { metric == .network ? 58 : 28 }
@@ -146,130 +132,128 @@ final class MenuBarMonitor {
         image.isTemplate = true  // macOS adapts the ink to light/dark menu bars and selection.
         return image
     }
-    func stop() {
-        subscription?.cancel(); subscription = nil; placement.stop()
-        for entry in items.values { remove(entry) }
-        items.removeAll(); displayScope.stop()
-        for name in smokeNames {
-            for key in UserDefaults.standard.dictionaryRepresentation().keys where key.contains(name) { UserDefaults.standard.removeObject(forKey: key) }
-        }
-    }
-    private func remove(_ entry: Entry) {
-        let name = entry.item.autosaveName
-        let position = MenuBarItemPlacement.savedPosition(of: entry.item)
-        entry.scope.stop(); NSStatusBar.system.removeStatusItem(entry.item)
-        // AppKit can discard a removed item's autosave position. Preserve the
-        // native key itself, so toggles and normal shutdown retain the user's slot.
-        if let name, let position { UserDefaults.standard.set(position, forKey: "NSStatusItem Preferred Position " + name) }
-    }
+    func stop() { subscription?.cancel(); subscription = nil; interaction.stop(); displayScope.stop() }
     func restoreDefaultPosition() {
-        if let screen = NSScreen.screens.first {
-            placement.restore(MenuBarItemPlacement.savedOrder(nativeItems), on: screen)
-        }
+        if let screen = NSScreen.screens.first { displayScope.restoreDefaultPosition(on: screen) }
     }
-    private func settlePlacement() throws {
-        let deadline = Date().addingTimeInterval(8)
-        while placement.isPlacing && Date() < deadline { RunLoop.main.run(until: Date().addingTimeInterval(0.05)) }
-        RunLoop.main.run(until: Date().addingTimeInterval(0.5))
-        guard !placement.isPlacing else { throw UserFacingError("Smoke: independent status-item placement did not settle") }
+    private func settlePlacement() {
+        let deadline = Date().addingTimeInterval(6)
+        while Date() < deadline { displayScope.refresh(); RunLoop.main.run(until: Date().addingTimeInterval(0.05)) }
     }
-    func verifyCurrentDisplay() throws {
-        try displayScope.verifyCurrentDisplay(expectedItemCount: nativeItems.count)
-        for entry in items.values { try entry.scope.verifyCurrentDisplay(expectedItemCount: nativeItems.count) }
-        let frames = nativeItems.compactMap { $0.button.flatMap { MenuBarDisplayScope.buttonScreenRect($0, includeWindowFrame: true) } }.sorted { $0.minX < $1.minX }
-        guard zip(frames, frames.dropFirst()).allSatisfy({ $0.maxX <= $1.minX + 0.5 }) else { throw UserFacingError("Smoke: independent status items overlap") }
-    }
+    func verifyCurrentDisplay() throws { try displayScope.verifyCurrentDisplay() }
     func verifyAndExport(snapshot: MonitorSnapshot, destination: URL) throws {
-        let all = Set(MenuBarMetric.allCases)
-        try settlePlacement()
-        guard activeMetrics == all, Set(nativeItems.compactMap(\.autosaveName)).count == all.count + 1,
-              items.allSatisfy({ metric, entry in entry.item.button?.image?.isTemplate == true && entry.item.button?.toolTip?.contains(metric.title) == true }),
-              nativeItems.allSatisfy({ $0.button?.target === statusItem.button?.target && $0.button?.action == statusItem.button?.action }) else {
-            throw UserFacingError("Smoke: independent native items, autosave names or click actions missing")
-        }
-        try verifyCurrentDisplay()
-        try verifyGroupDisplayScope()
-        try settlePlacement()
-        try items.values.compactMap { $0.item.button?.toolTip }.joined(separator: "\n\n").write(to: destination.appendingPathComponent("menu-bar-live.txt"), atomically: true, encoding: .utf8)
-        let identities = items.mapValues { ObjectIdentifier($0.item) }
-        let lengths = items.mapValues { $0.item.length }
-        for value in [0.0, 9, 99, 100, 999, 9_999, 999_999, 999_999_999, 1_000_000_000] {
-            var changing = snapshot; changing.cpu = min(value, 100)
-            changing.upload = value; changing.download = value; changing.fan = value
-            update(selected: all, snapshot: changing, running: true)
-            guard items.mapValues({ ObjectIdentifier($0.item) }) == identities, items.mapValues({ $0.item.length }) == lengths else {
-                throw UserFacingError("Smoke: sampling recreated or resized an independently draggable item")
-            }
-        }
-        update(selected: all, snapshot: snapshot, running: true)
-        try MenuBarRenderingSmokeChecks.run(destination: destination)
-        // Exercise the original confinement / notch fixtures with one isolated item.
-        update(selected: [], snapshot: snapshot, running: true)
-        guard items.isEmpty, statusItem.length == 16 else { throw UserFacingError("Smoke: disabled metrics retained a native slot") }
-        placement.stop(); displayScope.stop()
-        let isolated = MenuBarDisplayScope(item: statusItem, initializeOnLeft: false)
         checkingDisplayScope = true
-        do {
-            try isolated.verifyAndExport(destination: destination)
-            if ProcessInfo.processInfo.arguments.contains("--menu-bar-notch-check") {
-                // Keep the broad-window collision fixture comparable with the
-                // original consolidated item; production toolbox width stays 16.
-                statusItem.length = 278
-                try MenuBarPlacementSmokeChecks.run(item: statusItem, scope: isolated, destination: destination)
-                statusItem.length = 16
-            }
-        } catch { isolated.stop(); throw error }
-        isolated.stop(); checkingDisplayScope = false; displayScope = makeScope(for: statusItem)
-        update(selected: all, snapshot: snapshot, running: true); restoreDefaultPosition(); try settlePlacement()
-        // Reorder native slots, including the toolbox, then remove/re-enable a metric.
-        // Read back compositor order; writing defaults alone is not proof of movement.
-        let wanted = [items[.network]!.item, items[.cpu]!.item, statusItem] + MenuBarMetric.allCases.filter { $0 != .network && $0 != .cpu }.compactMap { items[$0]?.item }
-        placement.restore(wanted, on: NSScreen.screens.first!); try settlePlacement()
-        let names = wanted.compactMap(\.autosaveName)
-        func actualOrder() -> [String] {
-            nativeItems.sorted {
-                ($0.button.flatMap { MenuBarDisplayScope.buttonScreenRect($0) }?.minX ?? 0) < ($1.button.flatMap { MenuBarDisplayScope.buttonScreenRect($0) }?.minX ?? 0)
-            }.compactMap(\.autosaveName)
-        }
-        guard actualOrder() == names else { throw UserFacingError("Smoke: native status item reorder did not move the toolbox and network independently; wanted=\(names), actual=\(actualOrder())") }
-        update(selected: all.subtracting([.memory]), snapshot: snapshot, running: true)
-        update(selected: all, snapshot: snapshot, running: true); try settlePlacement()
-        guard actualOrder() == names else { throw UserFacingError("Smoke: re-enabling a metric lost its saved native position; wanted=\(names), actual=\(actualOrder())") }
-        try verifyCurrentDisplay()
-        for metric in MenuBarMetric.allCases {
-            guard MenuBarReading.make(metric, snapshot: snapshot, running: false).top == "—" else { throw UserFacingError("Smoke: paused metric shows stale data") }
-        }
-        let lines = nativeItems.map { "\($0.autosaveName ?? ""): length=\($0.length) position=\(MenuBarItemPlacement.savedPosition(of: $0) as Any) frame=\($0.button.flatMap { MenuBarDisplayScope.buttonScreenRect($0, includeWindowFrame: true) } as Any)" }
-        try lines.joined(separator: "\n").write(to: destination.appendingPathComponent("menu-bar-independent-items.txt"), atomically: true, encoding: .utf8)
-        print("PASS: 8 independently draggable native status items; unique autosave positions; toolbox/network reordering; metric removal/re-enabling preserves order; unchanged objects and widths during sampling")
-    }
-    private func verifyGroupDisplayScope() throws {
-        let entries = [displayScope!] + MenuBarMetric.allCases.compactMap { items[$0]?.scope }
-        let name = "iTools.group-display-check." + UUID().uuidString
-        let key = "NSStatusItem Preferred Position " + name
-        UserDefaults.standard.set(nativeItems.reduce(CGFloat(0)) { $0 + $1.length + 16 }, forKey: key)
-        let existing = Set(NSApp.windows.map(\.windowNumber))
-        let witness = NSStatusBar.system.statusItem(withLength: 20)
-        witness.autosaveName = name; witness.button?.title = "•"
-        func settle() { RunLoop.main.run(until: Date().addingTimeInterval(0.3)) }
-        checkingDisplayScope = true
+        // Preserve the application's configured group after isolated native checks.
         defer {
-            NSStatusBar.system.removeStatusItem(witness)
-            for entry in entries { entry.finishVisibilityCheck() }
             checkingDisplayScope = false
-            restoreDefaultPosition()
+            update(metrics: preferences.visibleMetrics, snapshot: snapshot, running: true)
+        }
+        checkingDisplayScope = false
+        let all = MenuBarMetric.allCases
+        update(metrics: all, snapshot: snapshot, running: true)
+        restoreDefaultPosition(); settlePlacement()
+        try verifyCurrentDisplay()
+        let identity = ObjectIdentifier(statusItem)
+        let length = statusItem.length
+        for value in [0.0, 9, 99, 100, 9_999, 999_999_999] {
+            var changing = snapshot; changing.cpu = min(value, 100); changing.upload = value; changing.download = value
+            update(metrics: all, snapshot: changing, running: true)
+            guard ObjectIdentifier(statusItem) == identity, statusItem.length == length else { throw UserFacingError("Smoke: sampling recreated or resized the metric group") }
+        }
+        update(metrics: all, snapshot: snapshot, running: true)
+        try readings.values.map(\.tooltip).joined(separator: "\n\n").write(to: destination.appendingPathComponent("menu-bar-live.txt"), atomically: true, encoding: .utf8)
+        checkingDisplayScope = true
+        try displayScope.verifyAndExport(destination: destination)
+        if ProcessInfo.processInfo.arguments.contains("--menu-bar-notch-check") {
+            try MenuBarPlacementSmokeChecks.run(item: statusItem, scope: displayScope, destination: destination)
+        }
+        checkingDisplayScope = false
+        update(metrics: all, snapshot: snapshot, running: true)
+        try verifyInternalInteraction(snapshot: snapshot)
+        try verifyNeighborOrder(snapshot: snapshot)
+        restoreDefaultPosition(); settlePlacement()
+        try MenuBarRenderingSmokeChecks.run(destination: destination)
+        try verifyCurrentDisplay()
+        print("PASS: one contiguous native metric group; toolbox only when all off; internal mouse/Cmd reorder; stable order across toggles; no app interleaving; fixed reading widths")
+    }
+    private func verifyInternalInteraction(snapshot: MonitorSnapshot) throws {
+        guard let button = statusItem.button, let window = button.window else { throw UserFacingError("Smoke: metric interaction window missing") }
+        let click = interaction.click
+        var clicks: [Bool] = []; interaction.click = { clicks.append($0) }
+        defer { interaction.click = click }
+        func event(_ type: NSEvent.EventType, metric: MenuBarMetric, flags: NSEvent.ModifierFlags = []) throws -> NSEvent {
+            guard let column = interaction.columns.first(where: { $0.metric == metric }) else { throw UserFacingError("Smoke: drag column missing") }
+            let origin = button.cell?.imageRect(forBounds: button.bounds).minX ?? 0
+            let location = interaction.convert(NSPoint(x: origin + column.x + column.width / 2, y: interaction.bounds.midY), to: nil)
+            guard let event = NSEvent.mouseEvent(with: type, location: location, modifierFlags: flags, timestamp: ProcessInfo.processInfo.systemUptime,
+                windowNumber: window.windowNumber, context: nil, eventNumber: 1, clickCount: 1, pressure: 1) else { throw UserFacingError("Smoke: own-window drag event missing") }
+            return event
+        }
+        // Feed the exact handler used by the local event monitor, in this own
+        // status window; do not synthesize global mouse/keyboard input.
+        interaction.handle(try event(.leftMouseDown, metric: .network, flags: .command), showCursor: false)
+        interaction.handle(try event(.leftMouseDragged, metric: .cpu, flags: .command), showCursor: false)
+        interaction.handle(try event(.leftMouseUp, metric: .cpu, flags: .command), showCursor: false)
+        update(metrics: preferences.visibleMetrics, snapshot: snapshot, running: true)
+        guard preferences.visibleMetrics.first == .network, interaction.visibleMetrics == preferences.visibleMetrics, clicks.isEmpty else { throw UserFacingError("Smoke: Cmd drag failed internal reorder or opened the panel") }
+        interaction.handle(try event(.leftMouseDown, metric: .fan), showCursor: false)
+        interaction.handle(try event(.leftMouseDragged, metric: .memory), showCursor: false)
+        interaction.handle(try event(.leftMouseUp, metric: .memory), showCursor: false)
+        interaction.handle(try event(.rightMouseDown, metric: .memory), showCursor: false)
+        update(metrics: preferences.visibleMetrics, snapshot: snapshot, running: true)
+        guard preferences.visibleMetrics[2] == .fan, clicks.isEmpty else { throw UserFacingError("Smoke: direct drag failed internal reorder") }
+        let wanted = preferences.visibleMetrics
+        for metric in [MenuBarMetric.memory, .cpu, .network] {
+            preferences.set(metric, enabled: false)
+            update(metrics: preferences.visibleMetrics, snapshot: snapshot, running: true)
+            preferences.set(metric, enabled: true)
+            update(metrics: preferences.visibleMetrics, snapshot: snapshot, running: true)
+            guard interaction.visibleMetrics == wanted else { throw UserFacingError("Smoke: metric toggle scrambled internal order") }
+        }
+        interaction.handle(try event(.leftMouseDown, metric: .memory), showCursor: false)
+        interaction.handle(try event(.leftMouseUp, metric: .memory), showCursor: false)
+        interaction.handle(try event(.rightMouseUp, metric: .memory), showCursor: false)
+        guard clicks == [false, true] else { throw UserFacingError("Smoke: group left/right clicks failed") }
+        update(metrics: [], snapshot: snapshot, running: true)
+        guard interaction.visibleMetrics.isEmpty, interaction.columns.count == 1, interaction.columns.first?.metric == nil, statusItem.length == 16 else { throw UserFacingError("Smoke: all-off toolbox failed") }
+        update(metrics: wanted, snapshot: snapshot, running: true)
+        guard interaction.columns.allSatisfy({ $0.metric != nil }) else { throw UserFacingError("Smoke: toolbox still visible with metrics") }
+    }
+    private func verifyNeighborOrder(snapshot: MonitorSnapshot) throws {
+        checkingDisplayScope = true
+        let name = "iTools.group-neighbors." + UUID().uuidString
+        UserDefaults.standard.set(0, forKey: "NSStatusItem Preferred Position " + name + ".a")
+        UserDefaults.standard.set(40, forKey: "NSStatusItem Preferred Position " + name + ".b")
+        let a = MenuBarDisplayScope.makeStatusItem(length: 20), b = MenuBarDisplayScope.makeStatusItem(length: 20)
+        a.autosaveName = name + ".a"; b.autosaveName = name + ".b"; a.button?.title = "•"; b.button?.title = "•"
+        _ = it_primary_status_item_set_position(Unmanaged.passUnretained(a).toOpaque(), 0)
+        _ = it_primary_status_item_set_position(Unmanaged.passUnretained(b).toOpaque(), 40)
+        let scopeA = MenuBarDisplayScope(item: a, initializeOnLeft: false), scopeB = MenuBarDisplayScope(item: b, initializeOnLeft: false)
+        func settle() { RunLoop.main.run(until: Date().addingTimeInterval(0.4)) }
+        defer {
+            scopeA.stop(); scopeB.stop()
+            a.isVisible = false; b.isVisible = false
+            NSStatusBar.system.removeStatusItem(a); NSStatusBar.system.removeStatusItem(b)
+            settle()
+            checkingDisplayScope = false
             for key in UserDefaults.standard.dictionaryRepresentation().keys where key.contains(name) { UserDefaults.standard.removeObject(forKey: key) }
         }
         settle()
-        let windows = NSApp.windows.filter { !existing.contains($0.windowNumber) && $0.level == .statusBar }
-        guard windows.count == NSScreen.screens.count else { throw UserFacingError("Smoke: independent-group layout witness missing a display") }
-        for entry in entries { entry.setVisibilityForCheck(false) }; settle()
-        let absent = Dictionary(uniqueKeysWithValues: windows.map { ($0.windowNumber, $0.frame) })
-        for entry in entries { entry.setVisibilityForCheck(true) }; settle()
-        for window in windows where window.screen !== NSScreen.screens.first {
-            guard window.frame == absent[window.windowNumber] else { throw UserFacingError("Smoke: independent metrics reserve secondary menu-bar space") }
+        func orderedNeighbors() -> [Int] {
+            [a, b].compactMap { item -> (Int, CGFloat)? in
+                guard let button = item.button, let window = button.window, let frame = MenuBarDisplayScope.buttonScreenRect(button) else { return nil }
+                return (window.windowNumber, frame.minX)
+            }.sorted { $0.1 < $1.1 }.map { $0.0 }
         }
-        print("PASS: all independent menu items retain zero secondary native layout width as a group")
+        let wanted = orderedNeighbors()
+        let slot = ObjectIdentifier(statusItem), autosave = statusItem.autosaveName
+        let order = preferences.visibleMetrics
+        for metrics in [order, [.cpu], [.memory, .network], [], order] {
+            checkingDisplayScope = false; update(metrics: metrics, snapshot: snapshot, running: true); checkingDisplayScope = true; settle()
+            guard orderedNeighbors() == wanted, ObjectIdentifier(statusItem) == slot, statusItem.autosaveName == autosave else { throw UserFacingError("Smoke: toggles changed the native slot or neighbor order") }
+            guard interaction.columns.filter({ $0.metric != nil }).count == metrics.count else { throw UserFacingError("Smoke: noncontiguous metric content") }
+        }
+        print("PASS: metrics toggle inside the same native slot; neighboring application-item order unchanged while group width contracts/expands")
     }
     deinit { stop() }
 }

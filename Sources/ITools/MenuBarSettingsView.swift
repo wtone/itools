@@ -6,7 +6,7 @@ struct MenuBarSettingsView: View {
     @ObservedObject var monitor: MonitorService
     var restorePosition: (() -> Void)? = nil
     var body: some View {
-        SectionBlock(title: "菜单栏显示", detail: "仅主显示器 · ⌘ 拖动排序 · 自动保存") {
+        SectionBlock(title: "菜单栏显示", detail: "连续指标区 · 内部排序 · 自动保存") {
             LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], alignment: .leading, spacing: 14) {
                 ForEach(MenuBarMetric.allCases) { metric in
                     HStack(spacing: 12) {
@@ -24,12 +24,12 @@ struct MenuBarSettingsView: View {
                 }
             }
             if preferences.enabledMetrics.isEmpty {
-                Text("已隐藏全部指标，iTools 工具箱图标仍保留。").font(.system(size: 11)).foregroundColor(.secondary)
+                Text("全部指标已关闭，菜单栏显示 iTools 工具箱图标。").font(.system(size: 11)).foregroundColor(.secondary)
             } else {
                 ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: MenuBarMonitor.metricGap) {
                     Text("显示预览").font(.system(size: 11)).foregroundColor(.secondary).padding(.trailing, 8)
-                    ForEach(MenuBarMetric.allCases.filter { preferences.isEnabled($0) }) { metric in
+                    ForEach(preferences.visibleMetrics) { metric in
                         let reading = MenuBarReading.make(metric, snapshot: monitor.snapshot, running: monitor.enabled)
                         Image(nsImage: MenuBarMonitor.image(for: reading, width: MenuBarMonitor.imageWidth(for: metric), metric: metric))
                             .renderingMode(.template).foregroundColor(.primary)
@@ -44,7 +44,7 @@ struct MenuBarSettingsView: View {
                 Text("默认显示在状态图标区最左侧，自动避开刘海。").font(.system(size: 11)).foregroundColor(.secondary)
                 Spacer()
                 Button("恢复可见位置") { restorePosition?() }.disabled(restorePosition == nil)
-                    .help("重新放置主图标及指标，保留开关和排列顺序")
+                    .help("重新放置整个指标区，保留开关和内部顺序")
             }
             if !monitor.enabled {
                 HStack {
@@ -56,7 +56,7 @@ struct MenuBarSettingsView: View {
                 Text("当前 macOS 暂不支持限定主屏，菜单栏入口已隐藏。可从 Dock 打开 iTools，或使用快捷键打开快捷面板。")
                     .font(.system(size: 11)).foregroundColor(.secondary)
             }
-            Text("主图标和每个指标都是独立菜单项：按住 ⌘ 拖动任意一项即可调整位置，也可以与其他应用的菜单项交错排列，位置自动保存。仅在主显示器显示，扩展屏不占位。网速上方上传、下方下载，悬停查看完整读数；点击打开快捷面板。拖入刘海遮挡区域后自动恢复可见位置。")
+            Text("开启任意指标时隐藏主图标，全部关闭时显示工具箱图标。指标始终相邻，可直接拖动或按住 ⌘ 拖动调整内部顺序；开关和重启保留排序。仅在主显示器显示，扩展屏不占位。网速两行左对齐，点击打开快捷面板，右键打开菜单。指标区宽度随开关变化，邻近应用图标只随原生布局平移，排列顺序保持不变。")
                 .font(.system(size: 11)).foregroundColor(.secondary)
         }
     }

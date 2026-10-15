@@ -6,8 +6,8 @@
 <key>CFBundleIdentifier</key><string>app.itools.mac.finder-actions</string>
 <key>CFBundleExecutable</key><string>IToolsFinderActions</string>
 <key>CFBundlePackageType</key><string>APPL</string>
-<key>CFBundleShortVersionString</key><string>0.13.13</string>
-<key>CFBundleVersion</key><string>34</string>
+<key>CFBundleShortVersionString</key><string>0.13.14</string>
+<key>CFBundleVersion</key><string>35</string>
 <key>LSMinimumSystemVersion</key><string>12.0</string>
 <key>LSUIElement</key><true/>
 <key>NSPrincipalClass</key><string>NSApplication</string>

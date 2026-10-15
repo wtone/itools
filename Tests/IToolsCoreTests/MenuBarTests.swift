@@ -29,6 +29,42 @@ final class MenuBarTests: XCTestCase {
         defaults.set(["memory", "futureMetric"], forKey: MenuBarPreferences.key)
         XCTAssertEqual(MenuBarPreferences(defaults: defaults).enabledMetrics, [.memory])
     }
+    func testInternalOrderSurvivesTogglesAndRelaunch() {
+        let settings = MenuBarPreferences(defaults: defaults)
+        for metric in MenuBarMetric.allCases { settings.set(metric, enabled: true) }
+        settings.move(.network, to: .cpu)
+        let wanted = settings.metricOrder
+        settings.set(.memory, enabled: false)
+        XCTAssertEqual(settings.visibleMetrics, wanted.filter { $0 != .memory })
+        settings.set(.memory, enabled: true)
+        XCTAssertEqual(settings.visibleMetrics, wanted)
+        for metric in MenuBarMetric.allCases { settings.set(metric, enabled: false) }
+        XCTAssertEqual(settings.metricOrder, wanted)
+        let restarted = MenuBarPreferences(defaults: defaults)
+        XCTAssertEqual(restarted.metricOrder, wanted)
+        XCTAssertTrue(restarted.visibleMetrics.isEmpty)
+        restarted.set(.memory, enabled: true)
+        restarted.set(.network, enabled: true)
+        XCTAssertEqual(restarted.visibleMetrics, wanted.filter { [.memory, .network].contains($0) })
+    }
+    func testOrderIgnoresUnknownAndDuplicateEntriesAndIncludesDisabledMetrics() {
+        defaults.set(["network", "future", "network", "memory"], forKey: MenuBarPreferences.orderKey)
+        let settings = MenuBarPreferences(defaults: defaults)
+        XCTAssertEqual(settings.metricOrder, [.network, .memory, .cpu, .gpu, .disk, .temperature, .fan])
+        XCTAssertEqual(Set(settings.metricOrder), Set(MenuBarMetric.allCases))
+        XCTAssertEqual(settings.visibleMetrics, [.cpu])
+    }
+    func testInternalOrderDoesNotRewriteNativeSlotsOrDisabledMonitor() {
+        let nativeKey = "NSStatusItem Preferred Position iTools.metrics"
+        defaults.set(420, forKey: nativeKey)
+        defaults.set(false, forKey: "monitor.enabled")
+        let settings = MenuBarPreferences(defaults: defaults)
+        settings.move(.cpu, to: .fan)
+        settings.set(.memory, enabled: true)
+        XCTAssertEqual(defaults.double(forKey: nativeKey), 420)
+        XCTAssertFalse(defaults.bool(forKey: "monitor.enabled"))
+        XCTAssertEqual(settings.metricOrder.last, .cpu)
+    }
     func testMissingReadingDiffersFromValidZero() {
         XCTAssertEqual(MetricFormatting.percent(nil), "—")
         XCTAssertEqual(MetricFormatting.percent(.nan), "—")

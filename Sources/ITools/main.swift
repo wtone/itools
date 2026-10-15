@@ -84,7 +84,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         model.shortcuts.run = { [weak self] id in self?.model.performCommand(id) }
         model.resetMenuBarPosition = { [weak self] in self?.restoreMenuBarPosition() }
         setupMainMenu(); setupStatusMenu()
-        menuBarMonitor = MenuBarMonitor(monitor: model.monitor, preferences: model.menuBar, statusItem: status, initializeOnLeft: initializeMenuBarOnLeft)
+        menuBarMonitor = MenuBarMonitor(monitor: model.monitor, preferences: model.menuBar, statusItem: status, initializeOnLeft: initializeMenuBarOnLeft, click: { [weak self] button, right in
+            self?.handleStatusClick(button, right: right)
+        })
         if (!launchedAtLogin || smoke) && !ProcessInfo.processInfo.arguments.contains("--capture-editor-check") && !ProcessInfo.processInfo.arguments.contains("--menu-bar-display-check") { showWindow() }
         readyForOpenRequests = true
         let queued = queuedOpenURLs; queuedOpenURLs.removeAll()
@@ -219,10 +221,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         status.button?.toolTip = "iTools 快捷面板 · 右键打开文字菜单"
     }
     @objc private func statusClicked(_ sender: NSStatusBarButton) {
+        handleStatusClick(sender, right: NSApp.currentEvent?.type == .rightMouseUp)
+    }
+    private func handleStatusClick(_ sender: NSStatusBarButton, right: Bool) {
         // Reject stale native events from a display removed/rearranged during a click.
         if let event = NSApp.currentEvent, [.leftMouseUp, .rightMouseUp].contains(event.type),
            !MenuBarDisplayScope.isPrimaryScreen(NSEvent.mouseLocation) { return }
-        if NSApp.currentEvent?.type == .rightMouseUp {
+        if right {
             quickPanelController?.close()
             if let rect = MenuBarDisplayScope.buttonScreenRect(sender) {
                 traditionalMenu.popUp(positioning: nil, at: NSPoint(x: rect.minX, y: rect.minY - 4), in: nil)

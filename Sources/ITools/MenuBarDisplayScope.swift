@@ -117,6 +117,16 @@ final class MenuBarDisplayScope {
         if !item.isVisible { item.isVisible = true }
         let pinned = identifier.withCString { it_primary_status_item_pin(Unmanaged.passUnretained(item).toOpaque(), $0) != 0 }
         guard pinned else { item.isVisible = false; return }
+        // AppKit can retain visible=true while a rapid resize has ordered the
+        // backing window out of the compositor. Recover only this original
+        // primary window, after its real bounds are safe and the bar is shown.
+        if NSMenu.menuBarVisible(), NSEvent.pressedMouseButtons == 0,
+           let button = item.button, let window = button.window,
+           let frame = Self.buttonScreenRect(button, includeWindowFrame: true),
+           MenuBarPlacement.isFrameVisible(frame, screen: screen.frame, rightArea: screen.auxiliaryTopRightArea),
+           !Self.isWindowOnScreen(button) {
+            window.orderOut(nil); window.orderFrontRegardless()
+        }
         // Wait for MenuBarMonitor to apply the final reading width. Keep valid
         // Cmd-drag positions; the old rightmost default (0) initializes on the left.
         if defaultPlacementPending, item.length != NSStatusItem.variableLength,
@@ -226,7 +236,10 @@ final class MenuBarDisplayScope {
     func setVisibilityForCheck(_ visible: Bool) {
         validating = true
         apply(screen: visible ? NSScreen.screens.first : nil)
-        if visible { _ = installPosition(MenuBarItemPlacement.savedPosition(of: item) ?? 0) }
+        if visible {
+            let saved = item.autosaveName.map { UserDefaults.standard.double(forKey: "NSStatusItem Preferred Position " + $0) } ?? 0
+            _ = installPosition(saved)
+        }
     }
     func finishVisibilityCheck() { validating = false; refresh() }
 
@@ -281,6 +294,13 @@ final class MenuBarDisplayScope {
         witness.autosaveName = witnessName
         witness.button?.title = "•"
         func settle() { RunLoop.main.run(until: Date().addingTimeInterval(0.4)) }
+        func placeForCheck(on screen: NSScreen) {
+            apply(screen: screen)
+            // A new autosave name can change a registry value without moving
+            // its existing compositor slot. Explicitly install the test slot.
+            _ = installPosition(0)
+            settle()
+        }
         defer {
             NSStatusBar.system.removeStatusItem(witness); item.length = originalLength
             item.autosaveName = originalAutosave
@@ -300,7 +320,7 @@ final class MenuBarDisplayScope {
         let witnessIDs = Set(witnessWindows.map(\.windowNumber))
         apply(screen: nil); settle()
         let baseline = Dictionary(uniqueKeysWithValues: witnessWindows.map { ($0.windowNumber, $0.frame) })
-        apply(screen: primary); settle()
+        placeForCheck(on: primary)
         func activeItemInfo() -> [[String: Any]] {
             (CGWindowListCopyWindowInfo(.optionOnScreenOnly, kCGNullWindowID) as? [[String: Any]] ?? [])
                 .filter { $0[kCGWindowOwnerPID as String] as? Int32 == ProcessInfo.processInfo.processIdentifier &&
@@ -329,20 +349,20 @@ final class MenuBarDisplayScope {
             return bounds
         }
         let before = try check(screen: primary)
-        item.length = 128; apply(screen: primary); settle()
+        item.length = 128; placeForCheck(on: primary)
         let after = try check(screen: primary)
         // A wider item grows to the left from its native right anchor. A neighbor
         // to its right legitimately stays still; it is not a width witness here.
         guard abs(after.width - before.width - 48) < 1, abs(after.maxX - before.maxX) < 1 else {
             throw UserFacingError("Smoke: primary status item lost native width/position layout: before=\(before), after=\(after)")
         }
-        item.length = 80; apply(screen: primary); settle()
+        item.length = 80; placeForCheck(on: primary)
         // Exercise the real display setter and native relayout without modifying macOS
         // preferences. Every nonselected display must return to the absent-item baseline.
-        for screen in NSScreen.screens { apply(screen: screen); settle(); try check(screen: screen) }
+        for screen in NSScreen.screens { placeForCheck(on: screen); try check(screen: screen) }
         apply(screen: nil); settle()
         guard activeItemInfo().isEmpty, witnessWindows.allSatisfy({ $0.frame == baseline[$0.windowNumber] }) else { throw UserFacingError("Smoke: missing-display fallback retained status item slots") }
-        apply(screen: primary); settle(); try check(screen: primary)
+        placeForCheck(on: primary); try check(screen: primary)
         let lines = NSScreen.screens.map { screen in
             "display=\(Self.screenID(screen) ?? 0) primary=\(primaryID) installedItems=\(Self.screenID(screen) == primaryID ? 1 : 0) secondaryReservedWidth=0 secondaryClickTargets=0"
         }
