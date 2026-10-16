@@ -18,17 +18,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var readyForOpenRequests = false
     private var queuedOpenURLs: [URL] = []
     private var launchedAtLogin = false
+    private var launchedForFinderAction = ProcessInfo.processInfo.arguments.contains(FinderLaunchEvent.hostActionArgument)
+    private var queuedFinderVisibility: [UUID] = []
+    private var seenFinderVisibility: [UUID] = []
+    private var finderVisibilityRunning = false
     func applicationWillFinishLaunching(_ notification: Notification) {
         NSAppleEventManager.shared().setEventHandler(self, andSelector: #selector(openApplication(_:reply:)),
             forEventClass: AEEventClass(kCoreEventClass), andEventID: AEEventID(kAEOpenApplication))
     }
     @objc private func openApplication(_ event: NSAppleEventDescriptor, reply: NSAppleEventDescriptor) {
+        if event.paramDescriptor(forKeyword: FinderLaunchEvent.requestsKey) != nil {
+            guard let urls = FinderLaunchEvent.requests(in: event),
+                  urls.allSatisfy({ FinderDirectRequest($0)?.action == FinderActions.visibilityActionID }) else { return }
+            if !readyForOpenRequests { launchedForFinderAction = true }
+            for url in urls {
+                guard let request = FinderDirectRequest(url), !seenFinderVisibility.contains(request.id),
+                      queuedFinderVisibility.count < 20 else { continue }
+                seenFinderVisibility.append(request.id)
+                if seenFinderVisibility.count > 200 { seenFinderVisibility.removeFirst() }
+                queuedFinderVisibility.append(request.id)
+            }
+            if readyForOpenRequests { runNextFinderVisibility() }
+            return
+        }
         if !readyForOpenRequests { launchedAtLogin = LoginLaunch.isLoginEvent(event) }
         else if !LoginLaunch.isLoginEvent(event) { showWindow() }
         if readyForOpenRequests { writeLoginTestReceipt() }
     }
     func applicationDidFinishLaunching(_ notification: Notification) {
         let smoke = ProcessInfo.processInfo.arguments.contains("--smoke-test")
+        if smoke { model.menuBar.setDisplaySelection(.init()) }
         if ProcessInfo.processInfo.arguments.contains("--permission-check") {
             NSApp.setActivationPolicy(.accessory)
             let status = PermissionCenter.shared; status.refresh()
@@ -42,7 +61,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         // Remember the source app before showing any iTools window or requesting access.
         AppFocus.shared.captureFrontmost()
-        NSApp.setActivationPolicy(launchedAtLogin && !smoke ? .accessory : .regular)
+        NSApp.setActivationPolicy((launchedAtLogin || launchedForFinderAction) && !smoke ? .accessory : .regular)
         let appearance = UserDefaults.standard.string(forKey: "appearance") ?? "system"
         NSApp.appearance = appearance == "system" ? nil : NSAppearance(named: appearance == "dark" ? .darkAqua : .aqua)
         window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1100, height: 790), styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView], backing: .buffered, defer: false)
@@ -87,8 +106,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menuBarMonitor = MenuBarMonitor(monitor: model.monitor, preferences: model.menuBar, statusItem: status, initializeOnLeft: initializeMenuBarOnLeft, click: { [weak self] button, right in
             self?.handleStatusClick(button, right: right)
         })
-        if (!launchedAtLogin || smoke) && !ProcessInfo.processInfo.arguments.contains("--capture-editor-check") && !ProcessInfo.processInfo.arguments.contains("--menu-bar-display-check") { showWindow() }
+        if ((!launchedAtLogin && !launchedForFinderAction) || smoke) && !ProcessInfo.processInfo.arguments.contains("--capture-editor-check") && !ProcessInfo.processInfo.arguments.contains("--menu-bar-display-check") { showWindow() }
         readyForOpenRequests = true
+        runNextFinderVisibility()
         let queued = queuedOpenURLs; queuedOpenURLs.removeAll()
         if !queued.isEmpty { application(NSApp, open: queued) }
         if smoke {
@@ -150,6 +170,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         model.start(); registerShortcuts()
         if ProcessInfo.processInfo.arguments.contains("--permission-help") {
             PermissionCenter.shared.show(.accessibility, operation: "直接粘贴")
+        }
+    }
+    private func runNextFinderVisibility() {
+        guard readyForOpenRequests, !finderVisibilityRunning, !queuedFinderVisibility.isEmpty else { return }
+        queuedFinderVisibility.removeFirst()
+        guard model.filesEnabled else {
+            queuedFinderVisibility.removeAll()
+            NoticeCenter.shared.report(UserFacingError("访达与文件功能已停用，请在 iTools 设置中开启。"))
+            showWindow(); return
+        }
+        finderVisibilityRunning = true
+        FinderVisibilityController.toggle { [weak self] error in
+            guard let self = self else { return }
+            self.finderVisibilityRunning = false
+            if let error = error { NoticeCenter.shared.report(error); self.showWindow() }
+            else { NoticeCenter.shared.success("已向访达发送隐藏文件显示切换。") }
+            DispatchQueue.main.async { self.runNextFinderVisibility() }
         }
     }
     func showWindow() {
@@ -226,7 +263,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func handleStatusClick(_ sender: NSStatusBarButton, right: Bool) {
         // Reject stale native events from a display removed/rearranged during a click.
         if let event = NSApp.currentEvent, [.leftMouseUp, .rightMouseUp].contains(event.type),
-           !MenuBarDisplayScope.isPrimaryScreen(NSEvent.mouseLocation) { return }
+           !MenuBarDisplayScope.allowsMenuBar(at: NSEvent.mouseLocation, selection: model.menuBar.displaySelection) { return }
         if right {
             quickPanelController?.close()
             if let rect = MenuBarDisplayScope.buttonScreenRect(sender) {
@@ -360,6 +397,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 if let button = self.status.button { try self.quickPanelController?.verifyAndExport(button: button, destination: destination) }
             } catch { print("FAIL: \(error.localizedDescription)"); exit(8) }
             if interfacePreview {
+                do {
+                    try FinderMenuSmokeChecks.run(destination: destination)
+                    try ShortcutWorkspaceSmokeChecks.render(model: self.model, destination: destination)
+                    try WindowGlassChecks.verifyAccessibilityFallback(destination: destination)
+                } catch { print("FAIL: \(error.localizedDescription)"); exit(18) }
                 self.renderPage(index: 0, destination: destination)
                 return
             }

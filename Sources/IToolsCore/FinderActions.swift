@@ -5,7 +5,10 @@ public struct FinderAction {
     public let id: String
     public let title: String
     public let directory: Bool
-    public init(_ id: String, _ title: String, directory: Bool = false) { self.id = id; self.title = title; self.directory = directory }
+    public let requiresPaths: Bool
+    public init(_ id: String, _ title: String, directory: Bool = false, requiresPaths: Bool = true) {
+        self.id = id; self.title = title; self.directory = directory; self.requiresPaths = requiresPaths
+    }
 }
 public struct FinderActionGroup {
     public let title: String
@@ -16,6 +19,7 @@ public struct FinderActionGroup {
     }
 }
 public enum FinderActions {
+    public static let visibilityActionID = "toggle-hidden-files"
     public static let groups: [FinderActionGroup] = [
         .init(title: "新建文件", icon: "doc.badge.plus", actions: [
             .init("new-txt", "文本文件 · TXT", directory: true), .init("new-md", "Markdown", directory: true),
@@ -34,6 +38,7 @@ public enum FinderActions {
             .init("alias", "发送快捷方式到桌面"), .init("airdrop", "隔空投送…"),
             .init("terminal", "进入终端"), .init("open-with", "选择打开方式…")]),
         .init(title: "显示、权限与清理", icon: "eye", actions: [
+            .init(visibilityActionID, "显示/不显示隐藏文件", requiresPaths: false),
             .init("show", "取消隐藏已选文件"), .init("hide", "隐藏已选文件"),
             .init("extension", "隐藏 / 显示文件扩展名"),
             .init("repair", "修复乱码文件名…"), .init("writable", "授予选择的文件写入权限"),

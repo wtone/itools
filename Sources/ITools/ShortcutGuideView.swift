@@ -3,16 +3,6 @@ import AppKit
 import IToolsCore
 
 private enum ShortcutPalette {
-    static let canvas = adaptive(0xF1F3F7, 0x242832)
-    static let card = adaptive(0xFFFFFF, 0x303640)
-    static let rail = adaptive(0x353A44, 0x20242B)
-    static func adaptive(_ light: UInt32, _ dark: UInt32) -> Color {
-        Color(NSColor(name: nil) { appearance in
-            let value = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua ? dark : light
-            return NSColor(srgbRed: Double((value >> 16) & 255) / 255, green: Double((value >> 8) & 255) / 255,
-                           blue: Double(value & 255) / 255, alpha: 1)
-        })
-    }
     static func tint(_ category: ShortcutCategory) -> Color {
         switch category {
         case .general: return Color(red: 0.20, green: 0.48, blue: 0.90)
@@ -66,9 +56,10 @@ struct ShortcutGuideView: View {
                         if sections.isEmpty && !showInteraction && !showLocalGuide { emptyState }
                     }.id(state.category.rawValue + state.query + String(state.assignedOnly))
                     footer
-                }.frame(maxWidth: .infinity, maxHeight: .infinity).background(ShortcutPalette.canvas)
+                }.frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }.foregroundColor(.primary).accentColor(accent).buttonStyle(ToolButtonStyle())
+            .background(FrostedBackground()).environment(\.workspaceSections, true)
             .onChange(of: state.category) { _ in editor.cancel() }
             .onChange(of: state.query) { _ in editor.cancel() }
             .onChange(of: state.assignedOnly) { _ in editor.cancel() }
@@ -82,8 +73,8 @@ struct ShortcutGuideView: View {
                 Image(systemName: "keyboard").font(.system(size: 23)).foregroundColor(.white)
                     .frame(width: 42, height: 42).background(accent).cornerRadius(12)
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("iTools").font(.system(size: 22, weight: .bold))
-                    Text("快捷键与操作指南").font(.system(size: 10)).foregroundColor(.white.opacity(0.68))
+                    Text("iTools").font(.system(size: 18, weight: .semibold))
+                    Text("快捷键与操作指南").font(.system(size: 10)).foregroundColor(InterfaceStyle.secondary)
                 }
             }.padding(.horizontal, 19).padding(.top, 30).padding(.bottom, 29)
             GlassScrollView {
@@ -97,18 +88,18 @@ struct ShortcutGuideView: View {
                                 Text(category.title).font(.system(size: 12, weight: state.category == category ? .semibold : .regular))
                                 Spacer(minLength: 0)
                                 Text(String(manager.preferences.actions.filter { ShortcutDirectory.location(of: $0).0 == category }.count))
-                                    .font(.system(size: 10)).foregroundColor(.white.opacity(0.6))
+                                    .font(.system(size: 10)).foregroundColor(InterfaceStyle.secondary)
                             }.padding(.horizontal, 10).padding(.vertical, 9).frame(maxWidth: .infinity, alignment: .leading)
-                                .background(state.category == category && !state.isSearching ? Color.white.opacity(0.14) : .clear)
+                                .background(state.category == category && !state.isSearching ? accent.opacity(0.14) : .clear)
                                 .cornerRadius(10).contentShape(Rectangle())
                         }.buttonStyle(.plain).accessibilityLabel(category.title)
                     }
                 }.padding(.horizontal, 10)
             }
             VStack(alignment: .leading, spacing: 13) {
-                Divider().overlay(Color.white.opacity(0.1))
+                Divider().opacity(0.5)
                 HStack {
-                    Text("随时呼出").font(.system(size: 11)).foregroundColor(.white.opacity(0.65))
+                    Text("随时呼出").font(.system(size: 11)).foregroundColor(InterfaceStyle.secondary)
                     Spacer()
                     Text(manager.display("app.guide")).font(.system(size: 12, weight: .medium, design: .monospaced))
                 }
@@ -117,21 +108,22 @@ struct ShortcutGuideView: View {
                     if Panels.confirm("恢复默认快捷键？", detail: "你的自定义组合将被清除，常用按键恢复初始设置。", action: "恢复") { manager.reset() }
                 } label: {
                     Label("恢复默认快捷键…", systemImage: "arrow.counterclockwise")
-                        .font(.system(size: 11)).foregroundColor(.white.opacity(0.8))
+                        .font(.system(size: 11)).foregroundColor(InterfaceStyle.secondary)
                 }.buttonStyle(.plain)
             }.padding(20)
-        }.foregroundColor(.white).frame(maxHeight: .infinity).background(ShortcutPalette.rail)
+        }.foregroundColor(InterfaceStyle.text).frame(maxHeight: .infinity).background(InterfaceStyle.canvas.opacity(0.20))
+            .overlay(alignment: .trailing) { Rectangle().fill(InterfaceStyle.border.opacity(0.22)).frame(width: 0.5) }
     }
     private var header: some View {
         HStack(alignment: .top) {
             VStack(alignment: .leading, spacing: 7) {
-                Text(state.isSearching ? "搜索结果" : state.category.title).font(.system(size: 26, weight: .semibold))
+                Text(state.isSearching ? "搜索结果" : state.category.title).font(.system(size: 22, weight: .semibold))
                 Text(state.isSearching ? "跨分类查找功能，在结果中直接修改按键。" : state.category.subtitle)
                     .font(.system(size: 12)).foregroundColor(.secondary)
             }
             Spacer()
             Button(action: close) { Image(systemName: "xmark").font(.system(size: 12, weight: .medium)).foregroundColor(.secondary)
-                    .frame(width: 30, height: 30).background(ShortcutPalette.card).clipShape(Circle()).contentShape(Circle())
+                    .frame(width: 30, height: 30).background(InterfaceStyle.surface.opacity(0.4)).clipShape(Circle()).contentShape(Circle())
             }.buttonStyle(.plain).accessibilityLabel("关闭快捷键面板").help("关闭 Esc")
         }.padding(.horizontal, 26).padding(.top, 28).padding(.bottom, 20)
     }
@@ -143,7 +135,7 @@ struct ShortcutGuideView: View {
                 if !state.query.isEmpty {
                     Button { state.query = "" } label: { Image(systemName: "xmark.circle.fill").foregroundColor(.secondary) }.buttonStyle(.plain).help("清除搜索")
                 }
-            }.padding(.horizontal, 12).padding(.vertical, 10).background(ShortcutPalette.card).cornerRadius(9)
+            }.padding(.horizontal, 12).padding(.vertical, 10).instrumentSurface(radius: 9)
             Toggle("仅已设置", isOn: $state.assignedOnly).font(.system(size: 11)).fixedSize()
         }.padding(.horizontal, 26).padding(.bottom, 18)
     }
@@ -196,7 +188,7 @@ struct ShortcutGuideView: View {
             Text(title).font(.system(size: 11)).foregroundColor(.secondary)
             Spacer()
             Text(key).font(.system(size: 11, weight: .medium, design: .monospaced))
-                .padding(.horizontal, 7).padding(.vertical, 4).background(ShortcutPalette.canvas).cornerRadius(5)
+                .padding(.horizontal, 7).padding(.vertical, 4).background(InterfaceStyle.canvas.opacity(0.24)).cornerRadius(5)
         }
     }
     private var emptyState: some View {
@@ -214,7 +206,7 @@ struct ShortcutGuideView: View {
                 .font(.system(size: 10)).foregroundColor(.secondary).lineLimit(1)
             Spacer(minLength: 0)
             Text("已设置 \(manager.preferences.bindings.count) / \(manager.preferences.actions.count)").font(.system(size: 10)).foregroundColor(.secondary).fixedSize()
-        }.padding(.horizontal, 26).padding(.vertical, 13).background(ShortcutPalette.card.opacity(0.65))
+        }.padding(.horizontal, 26).padding(.vertical, 13).background(InterfaceStyle.surface.opacity(0.12))
     }
 }
 
@@ -233,7 +225,7 @@ private struct ShortcutCard<Content: View>: View {
                 if !subtitle.isEmpty { Text(subtitle).font(.system(size: 10)).foregroundColor(.secondary).fixedSize(horizontal: false, vertical: true) }
                 content()
             }.padding(.horizontal, 17).padding(.vertical, 12).frame(maxWidth: .infinity, alignment: .leading)
-                .background(ShortcutPalette.card).cornerRadius(18)
+                .instrumentSurface(radius: 16)
         }.frame(maxWidth: .infinity, alignment: .topLeading)
     }
 }
@@ -284,7 +276,7 @@ private struct ShortcutActionRow: View {
     }
     private var keyField: some View {
         ZStack {
-            RoundedRectangle(cornerRadius: 7).fill(editing ? accent.opacity(0.09) : ShortcutPalette.canvas.opacity(0.7))
+            RoundedRectangle(cornerRadius: 7).fill(editing ? accent.opacity(0.09) : InterfaceStyle.canvas.opacity(0.28))
             if editing {
                 Text(editor.candidate?.display ?? "请按组合键").font(.system(size: 12, weight: .medium, design: .monospaced))
                     .foregroundColor(editor.error.isEmpty ? accent : .red)

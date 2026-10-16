@@ -223,12 +223,14 @@ final class FileService: ObservableObject {
               let components = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return }
         let paths = (components.queryItems ?? []).filter { $0.name == "path" }.compactMap(\.value)
         guard paths.count <= 200, paths.allSatisfy({ $0.hasPrefix("/") && !$0.contains("\0") }) else { return }
-        guard !working, !paths.isEmpty, let action = components.queryItems?.first(where: { $0.name == "action" })?.value,
-              FinderActions.action(action) != nil || action == "hidden" else { return }
+        guard !working, let action = components.queryItems?.first(where: { $0.name == "action" })?.value,
+              FinderActions.action(action) != nil || action == "hidden",
+              !paths.isEmpty || FinderActions.action(action)?.requiresPaths == false else { return }
         selection = paths.map { URL(fileURLWithPath: $0).standardizedFileURL }
         pendingFinderAction = components.queryItems?.first { $0.name == "action" }?.value
         // Custom URL schemes have no authenticated sender. Only stage a request; require an in-app click.
-        result = "已接收访达选择。请检查文件后执行操作。"
+        result = FinderActions.action(action)?.requiresPaths == false
+            ? "已接收访达显示设置请求。请确认后执行操作。" : "已接收访达选择。请检查文件后执行操作。"
     }
     func executePending() {
         guard let action = pendingFinderAction else { return }; pendingFinderAction = nil

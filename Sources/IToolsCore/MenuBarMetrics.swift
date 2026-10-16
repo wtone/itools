@@ -31,14 +31,22 @@ public enum MenuBarMetric: String, CaseIterable, Identifiable {
 public final class MenuBarPreferences: ObservableObject {
     public static let key = "menuBar.enabledMetrics"
     public static let orderKey = "menuBar.metricOrder"
+    public static let displayModeKey = "menuBar.displayMode"
+    public static let displayIDKey = "menuBar.displayID"
+    public static let displayNameKey = "menuBar.displayName"
     @Published public private(set) var enabledMetrics: Set<MenuBarMetric>
     @Published public private(set) var metricOrder: [MenuBarMetric]
+    @Published public private(set) var displaySelection: MenuBarDisplaySelection
     public var visibleMetrics: [MenuBarMetric] { metricOrder.filter { enabledMetrics.contains($0) } }
     private let defaults: UserDefaults
     private let persistChanges: Bool
     public init(defaults: UserDefaults = .standard, persistChanges: Bool = true) {
         self.defaults = defaults
         self.persistChanges = persistChanges
+        displaySelection = MenuBarDisplaySelection(
+            mode: defaults.string(forKey: Self.displayModeKey).flatMap(MenuBarDisplayMode.init(rawValue:)) ?? .single,
+            displayID: defaults.string(forKey: Self.displayIDKey),
+            displayName: defaults.string(forKey: Self.displayNameKey))
         let storedOrder = defaults.stringArray(forKey: Self.orderKey) ?? []
         var seen: Set<MenuBarMetric> = []
         let known = storedOrder.compactMap(MenuBarMetric.init(rawValue:)).filter { seen.insert($0).inserted }
@@ -57,6 +65,21 @@ public final class MenuBarPreferences: ObservableObject {
         if persistChanges { defaults.set(next.map(\.rawValue), forKey: Self.orderKey) }
     }
     public func isEnabled(_ metric: MenuBarMetric) -> Bool { enabledMetrics.contains(metric) }
+    public func setDisplaySelection(_ selection: MenuBarDisplaySelection) {
+        guard selection != displaySelection else { return }
+        displaySelection = selection
+        if persistChanges {
+            defaults.set(selection.mode.rawValue, forKey: Self.displayModeKey)
+            defaults.set(selection.displayID, forKey: Self.displayIDKey)
+            defaults.set(selection.displayName, forKey: Self.displayNameKey)
+        }
+    }
+    public func setDisplayMode(_ mode: MenuBarDisplayMode) {
+        setDisplaySelection(.init(mode: mode, displayID: displaySelection.displayID, displayName: displaySelection.displayName))
+    }
+    public func selectDisplay(id: String?, name: String?) {
+        setDisplaySelection(.init(mode: .single, displayID: id, displayName: name))
+    }
     public func set(_ metric: MenuBarMetric, enabled: Bool) {
         var next = enabledMetrics
         if enabled { next.insert(metric) } else { next.remove(metric) }

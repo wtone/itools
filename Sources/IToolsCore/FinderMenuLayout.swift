@@ -18,7 +18,12 @@ public struct FinderMenuLayout: Equatable {
     }
     public static func topLevelTitle(_ action: FinderAction) -> String { "iTools · " + displayTitle(action) }
     public static func decode(_ value: Any?) -> FinderMenuLayout {
-        FinderMenuLayout(topLevelIDs: Set(value as? [String] ?? []))
+        var ids = Set(value as? [String] ?? [])
+        let previous: Set<String> = ["show-hidden-files", "hide-hidden-files"]
+        if !ids.isDisjoint(with: previous) {
+            ids.subtract(previous); ids.insert(FinderActions.visibilityActionID)
+        }
+        return FinderMenuLayout(topLevelIDs: ids)
     }
     public static func load(key: String = preferenceKey) -> FinderMenuLayout {
         // Refresh on each menu opening, including when this extension was running

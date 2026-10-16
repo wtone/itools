@@ -19,7 +19,7 @@ public final class FinderMenuRequests {
     }
     public func request(tag: Int) -> URL? { menus.reversed().compactMap { $0[tag] }.first }
     public static func makeURL(action: String, paths: [URL], application: String? = nil) -> URL? {
-        guard FinderActions.action(action) != nil, !paths.isEmpty, paths.count <= 200,
+        guard let definition = FinderActions.action(action), (!definition.requiresPaths || !paths.isEmpty), paths.count <= 200,
               paths.allSatisfy({ $0.isFileURL && !$0.path.contains("\0") }) else { return nil }
         var components = URLComponents(); components.scheme = "itools"; components.host = "finder"
         components.queryItems = [.init(name: "action", value: action)] + paths.map { .init(name: "path", value: $0.path) }
@@ -120,13 +120,13 @@ public struct FinderDirectRequest {
         let items = c.queryItems ?? []
         guard items.allSatisfy({ ["action", "path", "request", "application"].contains($0.name) && $0.value != nil }),
               items.filter({ $0.name == "action" }).count == 1,
-              let action = items.first(where: { $0.name == "action" })?.value, FinderActions.action(action) != nil,
+              let action = items.first(where: { $0.name == "action" })?.value, let definition = FinderActions.action(action),
               items.filter({ $0.name == "request" }).count == 1,
               let token = items.first(where: { $0.name == "request" })?.value, let id = UUID(uuidString: token) else { return nil }
         let paths = items.filter { $0.name == "path" }.compactMap(\.value)
         let applications = items.filter { $0.name == "application" }.compactMap(\.value)
         guard applications.count <= 1, applications.allSatisfy({ action == "open-with" && Self.validApplication($0) }) else { return nil }
-        guard !paths.isEmpty, paths.count <= 200,
+        guard (!definition.requiresPaths || !paths.isEmpty), paths.count <= 200,
               paths.allSatisfy({ $0.hasPrefix("/") && !$0.contains("\0") }) else { return nil }
         self.id = id; self.action = action
         self.paths = paths.map { URL(fileURLWithPath: $0).standardizedFileURL }

@@ -84,7 +84,7 @@ enum ShortcutWorkspaceSmokeChecks {
             } catch { finish(error) }
         }
     }
-    private static func render(model: AppModel, destination: URL) throws {
+    static func render(model: AppModel, destination: URL) throws {
         let previews: [(String, ShortcutCategory, String, Bool, Bool, NSSize)] = [
             ("shortcut-guide", .general, "", false, false, NSSize(width: 1080, height: 760)),
             ("shortcut-clipboard", .clipboard, "", false, false, NSSize(width: 1080, height: 760)),

@@ -12,16 +12,20 @@ let accent = Color(NSColor(name: nil) { appearance in
 struct ToolButtonStyle: ButtonStyle {
     @Environment(\.isEnabled) private var enabled
     @Environment(\.controlSize) private var size
+    @Environment(\.colorScheme) private var scheme
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @State private var hovering = false
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(.system(size: size == .small ? 11 : 12))
             .foregroundColor(InterfaceStyle.text)
             .padding(.horizontal, 11).padding(.vertical, size == .small ? 4 : 6)
-            .background(configuration.isPressed ? accent.opacity(0.14) : InterfaceStyle.raised.opacity(0.78))
+            .background(configuration.isPressed ? accent.opacity(0.20) : hovering && enabled ? accent.opacity(0.10) : InterfaceStyle.raised.opacity(reduceTransparency ? 1 : scheme == .dark ? 0.24 : 0.36))
             .cornerRadius(7)
-            .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(InterfaceStyle.border.opacity(0.5), lineWidth: 0.6))
+            .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(InterfaceStyle.border.opacity(hovering && enabled ? 0.55 : 0.28), lineWidth: 0.6))
             .shadow(color: .black.opacity(configuration.isPressed ? 0 : 0.025), radius: 1, y: 1)
             .opacity(enabled ? 1 : 0.4)
+            .onHover { hovering = $0 }
     }
 }
 struct RootView: View {
@@ -62,7 +66,7 @@ struct RootView: View {
                     Text(notices.message).help(notices.message).lineLimit(1).font(.system(size: 11)).foregroundColor(InterfaceStyle.secondary)
                     Spacer()
                     Image(systemName: "lock.shield").font(.system(size: 11)).foregroundColor(InterfaceStyle.secondary)
-                }.padding(.horizontal, 22).padding(.vertical, 10).background(InterfaceStyle.surface.opacity(0.16))
+                }.padding(.horizontal, 22).padding(.vertical, 10).background(InterfaceStyle.surface.opacity(0.10))
             }.frame(maxWidth: .infinity, maxHeight: .infinity).foregroundColor(InterfaceStyle.text)
         }.background(FrostedBackground())
             .overlay(alignment: .top) { WindowDragStrip().frame(height: 30) }
@@ -75,39 +79,50 @@ struct RootView: View {
 }
 private struct MainSidebar: View {
     @ObservedObject var model: AppModel
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     var body: some View {
-        VStack(spacing: 4) {
+        VStack(spacing: 7) {
             HStack(spacing: 11) {
-                InstrumentIcon(name: "square.stack.3d.up.fill", color: InterfaceStyle.cyan, size: 36)
+                InstrumentIcon(name: "square.stack.3d.up.fill", color: InterfaceStyle.cyan, size: 40)
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("iTools").font(.system(size: 18, weight: .semibold))
+                    Text("iTools").font(.system(size: 20, weight: .semibold))
                     Text("v" + (Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "开发版"))
-                        .font(.system(size: 10)).foregroundColor(InterfaceStyle.secondary)
+                        .font(.system(size: 11)).foregroundColor(.white.opacity(0.65))
                 }
                 Spacer()
-            }.foregroundColor(InterfaceStyle.text).padding(.horizontal, 22).padding(.top, 42).padding(.bottom, 18)
+            }.foregroundColor(.white).padding(.horizontal, 22).padding(.top, 42).padding(.bottom, 16)
             ForEach(ToolPage.allCases) { page in
                 Button { model.page = page } label: {
                     HStack(spacing: 12) {
-                        InstrumentIcon(name: page.icon, color: InterfaceStyle.color(for: page), size: 25)
-                        Text(page.rawValue).font(.system(size: 13, weight: model.page == page ? .semibold : .medium))
+                        InstrumentIcon(name: page.icon, color: InterfaceStyle.color(for: page), size: 32)
+                        Text(page.rawValue).font(.system(size: 15, weight: model.page == page ? .semibold : .medium)).lineLimit(1)
                         Spacer(minLength: 0)
-                    }.foregroundColor(model.page == page ? accent : InterfaceStyle.text)
-                        .padding(.horizontal, 14).padding(.vertical, 8)
+                    }.foregroundColor(.white)
+                        .padding(.horizontal, 13).padding(.vertical, 10)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(model.page == page ? accent.opacity(0.13) : .clear).cornerRadius(10)
+                        .background(model.page == page ? Color.white.opacity(0.16) : .clear).cornerRadius(10)
                         .contentShape(Rectangle())
                 }.buttonStyle(.plain).padding(.horizontal, 13).accessibilityLabel(page.rawValue)
+                    .accessibilityAddTraits(model.page == page ? [.isSelected] : [])
             }
             Spacer(minLength: 15)
             Button { model.showShortcutSettings?(nil) } label: {
                 Label("快捷键与操作指南", systemImage: "keyboard").font(.system(size: 11))
-                    .foregroundColor(InterfaceStyle.secondary).frame(maxWidth: .infinity).padding(.vertical, 10)
-                    .background(InterfaceStyle.raised.opacity(0.5)).cornerRadius(9).contentShape(Rectangle())
+                    .foregroundColor(.white.opacity(0.88)).frame(maxWidth: .infinity).padding(.vertical, 10)
+                    .background(Color.white.opacity(0.08)).cornerRadius(9).contentShape(Rectangle())
             }.buttonStyle(.plain).padding(.horizontal, 17)
-            Text("macOS 12+").font(.system(size: 10)).foregroundColor(InterfaceStyle.secondary)
+            Text("macOS 12+").font(.system(size: 10)).foregroundColor(.white.opacity(0.6))
                 .padding(.top, 9).padding(.bottom, 18)
-        }.frame(width: 218).background(InterfaceStyle.canvas.opacity(0.75))
+        }.frame(width: 218)
+            .background {
+                if reduceTransparency { InterfaceStyle.graphite }
+                else {
+                    // A dark native material keeps white navigation legible over any desktop.
+                    FrostedMaterial(appearance: .darkAqua)
+                    Color.black.opacity(0.08)
+                }
+            }
+            .overlay(alignment: .trailing) { Rectangle().fill(Color.white.opacity(0.10)).frame(width: 0.5) }
     }
 }
 

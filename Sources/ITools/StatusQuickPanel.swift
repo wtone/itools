@@ -19,12 +19,13 @@ final class StatusQuickPanel: NSPanel {
 struct StatusPanelChrome<Content: View>: View {
     let placement: MenuPanelPlacement
     let content: Content
+    @Environment(\.colorScheme) private var scheme
     var body: some View {
         content.frame(width: placement.frame.width, height: placement.frame.height - MenuPanelPlacement.arrowHeight)
             .padding(.top, MenuPanelPlacement.arrowHeight)
             .background(FrostedBackground())
             .clipShape(StatusPanelOutline(arrowX: placement.arrowX))
-            .overlay(StatusPanelOutline(arrowX: placement.arrowX).stroke(InterfaceStyle.border.opacity(0.65), lineWidth: 0.8))
+            .overlay(StatusPanelOutline(arrowX: placement.arrowX).stroke(Color.white.opacity(scheme == .dark ? 0.16 : 0.48), lineWidth: 0.7))
     }
 }
 

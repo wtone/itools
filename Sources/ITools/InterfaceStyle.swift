@@ -78,16 +78,17 @@ struct InstrumentSurface: ViewModifier {
         content
             .background {
                 ZStack {
-                    InterfaceStyle.surface.opacity(reduceTransparency ? 1 : (scheme == .dark ? 0.82 : 0.78))
-                    if scheme == .dark && !reduceTransparency {
-                        LinearGradient(colors: [.white.opacity(0.055), .white.opacity(0.01)], startPoint: .top, endPoint: .bottom)
+                    InterfaceStyle.surface.opacity(reduceTransparency ? 1 : (scheme == .dark ? 0.20 : 0.26))
+                    if let tint = tint, !reduceTransparency { tint.opacity(0.06) }
+                    if !reduceTransparency {
+                        LinearGradient(colors: [.white.opacity(scheme == .dark ? 0.03 : 0.07), .clear], startPoint: .topLeading, endPoint: .bottomTrailing)
                     }
                 }
             }
             .overlay {
                 if !(workspaceSections && scheme == .dark) {
                     RoundedRectangle(cornerRadius: radius, style: .continuous)
-                        .strokeBorder(Color.white.opacity(tint == nil ? (scheme == .dark ? 0.20 : 0.12) : 0.3), lineWidth: 0.7)
+                        .strokeBorder(Color.white.opacity(tint == nil ? (scheme == .dark ? 0.12 : 0.38) : 0.42), lineWidth: 0.7)
                 }
             }
             .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
@@ -123,23 +124,37 @@ struct FrostedBackground: View {
             else {
                 FrostedMaterial()
                 if tinted {
-                    InterfaceStyle.canvas.opacity(0.86)
+                    // A light wash unifies the hue without covering the native blur.
+                    InterfaceStyle.canvas.opacity(scheme == .dark ? 0.07 : 0.04)
+                    LinearGradient(colors: [.white.opacity(scheme == .dark ? 0.015 : 0.04), .clear], startPoint: .topLeading, endPoint: .bottomTrailing)
                 }
             }
-        }.allowsHitTesting(false)
+        }.allowsHitTesting(false).ignoresSafeArea()
     }
 }
 
 struct FrostedMaterial: NSViewRepresentable {
+    var appearance: NSAppearance.Name? = nil
     func makeNSView(context: Context) -> NSVisualEffectView {
-        let view = NSVisualEffectView()
+        let view = WindowMaterial()
         view.material = .hudWindow
         view.blendingMode = .behindWindow
         view.state = .active
         view.identifier = NSUserInterfaceItemIdentifier("itools.window-glass")
+        view.appearance = appearance.flatMap(NSAppearance.init(named:))
         return view
     }
-    func updateNSView(_ view: NSVisualEffectView, context: Context) {}
+    func updateNSView(_ view: NSVisualEffectView, context: Context) {
+        view.appearance = appearance.flatMap(NSAppearance.init(named:))
+    }
+    private final class WindowMaterial: NSVisualEffectView {
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            // SwiftUI sheets and utility windows otherwise keep an opaque canvas.
+            window?.isOpaque = false; window?.backgroundColor = .clear
+        }
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
+    }
 }
 
 /// A transparent drag strip; the system retains ownership of all three window buttons.

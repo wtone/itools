@@ -82,7 +82,7 @@ struct FinderMenuSettingsView: View {
                         }
                         if groups.isEmpty { Text("没有匹配的操作").foregroundColor(.secondary).padding(.vertical, 30) }
                     }.padding(14).frame(maxWidth: .infinity, alignment: .leading)
-                }.background(Color(NSColor.controlBackgroundColor)).cornerRadius(9)
+                }.instrumentSurface(radius: 12)
                 VStack(alignment: .leading, spacing: 10) {
                     Text("一级菜单预览").font(.system(size: 13, weight: .semibold))
                     Text("已选 \(preferences.layout.topLevelActions.count) / \(FinderActions.all.count) 项").font(.system(size: 12)).foregroundColor(.secondary)
@@ -103,7 +103,7 @@ struct FinderMenuSettingsView: View {
                                     .font(.system(size: 11)).foregroundColor(.secondary)
                             }
                         }.padding(12).frame(maxWidth: .infinity, alignment: .leading)
-                    }.background(Color(NSColor.controlBackgroundColor)).cornerRadius(9)
+                    }.instrumentSurface(radius: 12)
                     Text("“打开方式”移到一级后，仍展开系统关联应用列表。")
                         .font(.system(size: 11)).foregroundColor(.secondary).fixedSize(horizontal: false, vertical: true)
                 }.frame(width: 260)
@@ -116,6 +116,7 @@ struct FinderMenuSettingsView: View {
                 Spacer()
                 Button("完成") { dismiss() }.buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction)
             }.font(.system(size: 12))
-        }.padding(24).frame(width: 780, height: 660).background(Color(NSColor.windowBackgroundColor))
+        }.padding(24).frame(width: 780, height: 660).background(FrostedBackground())
+            .buttonStyle(ToolButtonStyle())
     }
 }

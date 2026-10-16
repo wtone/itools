@@ -6,8 +6,8 @@
 <key>CFBundleIdentifier</key><string>app.itools.mac.finder</string>
 <key>CFBundleExecutable</key><string>IToolsFinder</string>
 <key>CFBundlePackageType</key><string>XPC!</string>
-<key>CFBundleShortVersionString</key><string>0.13.14</string>
-<key>CFBundleVersion</key><string>35</string>
+<key>CFBundleShortVersionString</key><string>0.13.20</string>
+<key>CFBundleVersion</key><string>41</string>
 <key>LSMinimumSystemVersion</key><string>12.0</string>
 <key>NSExtension</key><dict>
 <key>NSExtensionPointIdentifier</key><string>com.apple.FinderSync</string>

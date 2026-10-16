@@ -20,6 +20,7 @@ extension FileService {
         case "hidden": toggleHidden()
         case "hide": setHidden(true)
         case "show": setHidden(false)
+        case FinderActions.visibilityActionID: toggleFinderHiddenFiles()
         case "extension": toggleExtensions()
         case "hash": hash()
         case "rename": rename()
@@ -44,6 +45,18 @@ extension FileService {
         case "fast-7z", "fast-zip", "fast-7z-trash", "fast-zip-trash", "zip", "zip-trash", "encrypt-7z", "encrypt-zip":
             archive(preset: action)
         default: break
+        }
+    }
+    func toggleFinderHiddenFiles() {
+        working = true; systemOperationInProgress = true
+        result = "正在切换隐藏文件显示…"
+        FinderVisibilityController.toggle { error in
+            self.working = false; self.systemOperationInProgress = false
+            if let error = error { self.result = error.localizedDescription; NoticeCenter.shared.report(error) }
+            else {
+                self.result = "已向访达发送隐藏文件显示切换。"
+                NoticeCenter.shared.success(self.result)
+            }
         }
     }
     func chooseTemplate() {

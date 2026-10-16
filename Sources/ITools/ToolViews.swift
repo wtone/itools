@@ -43,11 +43,14 @@ struct FilesPage: View {
                         Menu {
                             ForEach(group.actions, id: \.id) { action in
                                 Button(action.title) { service.performAction(action.id) }
+                                    .disabled(action.requiresPaths && service.selection.isEmpty)
                             }
                         } label: { Label(group.title, systemImage: group.icon) }
+                        .disabled(service.selection.isEmpty && group.actions.allSatisfy(\.requiresPaths))
                     }
                     Button("选择文件后扫描大小") { service.scanDisk() }
-                }.disabled(service.selection.isEmpty || service.working)
+                        .disabled(service.selection.isEmpty)
+                }.disabled(service.working)
                 Text("压缩包括 ZIP / 7z、AES 加密和完整性校验。密码仅保留至退出应用。")
                     .font(.system(size: 11)).foregroundColor(.secondary)
             }
@@ -97,7 +100,7 @@ struct FilesPage: View {
             }
             if !service.result.isEmpty {
                 Text(service.result).font(.system(size: 12)).textSelection(.enabled).padding(14)
-                    .frame(maxWidth: .infinity, alignment: .leading).background(Color(NSColor.windowBackgroundColor)).cornerRadius(8)
+                    .frame(maxWidth: .infinity, alignment: .leading).instrumentSurface(radius: 10)
             }
         }
     }

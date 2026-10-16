@@ -34,35 +34,89 @@ struct MenuBarReading {
     }
 }
 
-/// One native slot contains an ordered, contiguous group of readings.
+/// One native slot per selected display, sharing the same monitor and preferences.
 final class MenuBarMonitor {
     static let metricGap: CGFloat = 4
     private var subscription: AnyCancellable?
-    private let statusItem: NSStatusItem
+    let statusItem: NSStatusItem
     private let preferences: MenuBarPreferences
     private let toolboxImage: NSImage?
     private var displayScope: MenuBarDisplayScope!
-    private let interaction: MenuBarMetricsView
+    private var interaction: MenuBarMetricsView!
+    private var modeSubscription: AnyCancellable?
+    private let pinnedDisplayID: String?
+    private var replicas: [String: MenuBarMonitor] = [:]
+    private var screenObserver: NSObjectProtocol?
+    private let monitor: MonitorService
+    private let clickHandler: (NSStatusBarButton, Bool) -> Void
     private var checkingDisplayScope = false
     private(set) var activeMetrics: Set<MenuBarMetric> = []
     private var readings: [MenuBarMetric: MenuBarReading] = [:]
     init(monitor: MonitorService, preferences: MenuBarPreferences, statusItem: NSStatusItem, initializeOnLeft: Bool,
-         click: @escaping (NSStatusBarButton, Bool) -> Void) {
+         pinnedDisplayID: String? = nil, click: @escaping (NSStatusBarButton, Bool) -> Void) {
         self.statusItem = statusItem; self.preferences = preferences
+        self.monitor = monitor; self.clickHandler = click; self.pinnedDisplayID = pinnedDisplayID
         toolboxImage = statusItem.button?.image
-        interaction = MenuBarMetricsView(button: statusItem.button!)
-        statusItem.button?.addSubview(interaction)
-        interaction.move = { [weak preferences] metric, target in preferences?.move(metric, to: target) }
-        interaction.click = { [weak statusItem] right in
-            guard let button = statusItem?.button else { return }; click(button, right)
-        }
+        installInteraction()
         subscription = Publishers.CombineLatest4(monitor.$snapshot, monitor.$enabled, preferences.$enabledMetrics, preferences.$metricOrder)
             .debounce(for: .milliseconds(100), scheduler: DispatchQueue.main)
             .sink { [weak self] snapshot, running, selected, order in
                 self?.update(metrics: order.filter { selected.contains($0) }, snapshot: snapshot, running: running)
             }
         update(metrics: preferences.visibleMetrics, snapshot: monitor.snapshot, running: monitor.enabled)
-        displayScope = MenuBarDisplayScope(item: statusItem, initializeOnLeft: initializeOnLeft)
+        displayScope = MenuBarDisplayScope(item: statusItem, initializeOnLeft: initializeOnLeft, preferences: preferences, pinnedDisplayID: pinnedDisplayID)
+        if pinnedDisplayID == nil {
+            modeSubscription = preferences.$displaySelection.dropFirst()
+                .receive(on: DispatchQueue.main).sink { [weak self] _ in self?.refreshDisplayConfiguration() }
+            screenObserver = NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification,
+                object: nil, queue: .main) { [weak self] _ in self?.refreshDisplayConfiguration() }
+            refreshDisplayConfiguration()
+        }
+    }
+    private func installInteraction() {
+        interaction = MenuBarMetricsView(button: statusItem.button!)
+        statusItem.button?.addSubview(interaction)
+        interaction.move = { [weak preferences] metric, target in preferences?.move(metric, to: target) }
+        interaction.click = { [weak self] right in
+            guard let self, let button = self.statusItem.button else { return }
+            self.clickHandler(button, right)
+        }
+    }
+    func refreshDisplayConfiguration() {
+        guard pinnedDisplayID == nil else { displayScope.refresh(); return }
+        let targets = preferences.displaySelection.mode == .all && MenuBarDisplayScope.isSupported ? Array(MenuBarDisplayScope.availableScreens.dropFirst()) : []
+        let wanted = Set(targets.map(\.id))
+        for id in Array(replicas.keys) where !wanted.contains(id) {
+            if let replica = replicas.removeValue(forKey: id) {
+                replica.stop()
+                Self.removeReplicaItem(replica.statusItem)
+            }
+        }
+        for screen in targets where replicas[screen.id] == nil {
+            let name = (statusItem.autosaveName ?? "iTools.metrics") + ".display." + screen.id
+            let initializeOnLeft = MenuBarDisplayScope.prepareAutosave(name)
+            let item = MenuBarDisplayScope.makeStatusItem(length: statusItem.length)
+            item.autosaveName = name
+            item.button?.image = toolboxImage
+            item.button?.target = statusItem.button?.target; item.button?.action = statusItem.button?.action
+            item.button?.sendAction(on: [.leftMouseUp, .rightMouseUp])
+            replicas[screen.id] = MenuBarMonitor(monitor: monitor, preferences: preferences, statusItem: item,
+                initializeOnLeft: initializeOnLeft, pinnedDisplayID: screen.id, click: clickHandler)
+        }
+        // Apply the current shared selection before pinning the new topology.
+        // Do not wait for a queued sampling delivery to size a newly shown item.
+        update(metrics: preferences.visibleMetrics, snapshot: monitor.snapshot, running: monitor.enabled)
+        displayScope.refresh()
+        for replica in replicas.values {
+            replica.update(metrics: preferences.visibleMetrics, snapshot: monitor.snapshot, running: monitor.enabled)
+            replica.displayScope.refresh()
+        }
+    }
+    private static func removeReplicaItem(_ item: NSStatusItem) {
+        let key = item.autosaveName.map { "NSStatusItem Preferred Position " + $0 }
+        let saved = key.flatMap { UserDefaults.standard.object(forKey: $0) }
+        NSStatusBar.system.removeStatusItem(item)
+        if let key, let saved { UserDefaults.standard.set(saved, forKey: key) }
     }
     private func update(metrics: [MenuBarMetric], snapshot: MonitorSnapshot, running: Bool) {
         guard !checkingDisplayScope else { return }
@@ -132,9 +186,16 @@ final class MenuBarMonitor {
         image.isTemplate = true  // macOS adapts the ink to light/dark menu bars and selection.
         return image
     }
-    func stop() { subscription?.cancel(); subscription = nil; interaction.stop(); displayScope.stop() }
+    func stop() {
+        subscription?.cancel(); subscription = nil; modeSubscription?.cancel(); modeSubscription = nil
+        if let screenObserver { NotificationCenter.default.removeObserver(screenObserver) }; screenObserver = nil
+        interaction.stop(); displayScope.stop()
+        for replica in replicas.values { replica.stop(); Self.removeReplicaItem(replica.statusItem) }
+        replicas.removeAll()
+    }
     func restoreDefaultPosition() {
-        if let screen = NSScreen.screens.first { displayScope.restoreDefaultPosition(on: screen) }
+        if let screen = displayScope.placementScreen { displayScope.restoreDefaultPosition(on: screen) }
+        for replica in replicas.values { replica.restoreDefaultPosition() }
     }
     private func settlePlacement() {
         let deadline = Date().addingTimeInterval(6)
@@ -171,6 +232,9 @@ final class MenuBarMonitor {
         update(metrics: all, snapshot: snapshot, running: true)
         try verifyInternalInteraction(snapshot: snapshot)
         try verifyNeighborOrder(snapshot: snapshot)
+        if ProcessInfo.processInfo.arguments.contains("--menu-bar-display-mode-check") {
+            try verifyDisplayModes(preferences: preferences, destination: destination)
+        }
         restoreDefaultPosition(); settlePlacement()
         try MenuBarRenderingSmokeChecks.run(destination: destination)
         try verifyCurrentDisplay()
@@ -191,17 +255,25 @@ final class MenuBarMonitor {
         }
         // Feed the exact handler used by the local event monitor, in this own
         // status window; do not synthesize global mouse/keyboard input.
+        let beforeCommandDrag = preferences.visibleMetrics
+        guard let cpuTarget = beforeCommandDrag.firstIndex(of: .cpu) else { throw UserFacingError("Smoke: CPU target missing") }
         interaction.handle(try event(.leftMouseDown, metric: .network, flags: .command), showCursor: false)
         interaction.handle(try event(.leftMouseDragged, metric: .cpu, flags: .command), showCursor: false)
         interaction.handle(try event(.leftMouseUp, metric: .cpu, flags: .command), showCursor: false)
         update(metrics: preferences.visibleMetrics, snapshot: snapshot, running: true)
-        guard preferences.visibleMetrics.first == .network, interaction.visibleMetrics == preferences.visibleMetrics, clicks.isEmpty else { throw UserFacingError("Smoke: Cmd drag failed internal reorder or opened the panel") }
+        guard preferences.visibleMetrics[cpuTarget] == .network,
+              preferences.visibleMetrics.filter({ $0 != .network }) == beforeCommandDrag.filter({ $0 != .network }),
+              interaction.visibleMetrics == preferences.visibleMetrics, clicks.isEmpty else { throw UserFacingError("Smoke: Cmd drag failed internal reorder or opened the panel") }
+        let beforeDirectDrag = preferences.visibleMetrics
+        guard let memoryTarget = beforeDirectDrag.firstIndex(of: .memory) else { throw UserFacingError("Smoke: memory target missing") }
         interaction.handle(try event(.leftMouseDown, metric: .fan), showCursor: false)
         interaction.handle(try event(.leftMouseDragged, metric: .memory), showCursor: false)
         interaction.handle(try event(.leftMouseUp, metric: .memory), showCursor: false)
         interaction.handle(try event(.rightMouseDown, metric: .memory), showCursor: false)
         update(metrics: preferences.visibleMetrics, snapshot: snapshot, running: true)
-        guard preferences.visibleMetrics[2] == .fan, clicks.isEmpty else { throw UserFacingError("Smoke: direct drag failed internal reorder") }
+        guard preferences.visibleMetrics[memoryTarget] == .fan,
+              preferences.visibleMetrics.filter({ $0 != .fan }) == beforeDirectDrag.filter({ $0 != .fan }),
+              interaction.visibleMetrics == preferences.visibleMetrics, clicks.isEmpty else { throw UserFacingError("Smoke: direct drag failed internal reorder") }
         let wanted = preferences.visibleMetrics
         for metric in [MenuBarMetric.memory, .cpu, .network] {
             preferences.set(metric, enabled: false)

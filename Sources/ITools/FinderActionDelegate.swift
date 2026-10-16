@@ -78,6 +78,8 @@ final class FinderActionDelegate: NSObject, NSApplicationDelegate {
         guard active == nil, !executing, NSApp.modalWindow == nil, !queued.isEmpty else { return }
         idleTimer?.invalidate()
         let request = queued.removeFirst(); active = request; started = Date()
+        let appearance = UserDefaults(suiteName: FinderHostLocation.bundleID)?.string(forKey: "appearance") ?? "system"
+        NSApp.appearance = appearance == "system" ? nil : NSAppearance(named: appearance == "dark" ? .darkAqua : .aqua)
         errors = []; dialogs = []
         files.selection = request.paths; files.pendingFinderAction = nil; files.result = ""
         files.scanSummary = ""; files.scanEntries = []; files.operationIssues = []
@@ -90,7 +92,8 @@ final class FinderActionDelegate: NSObject, NSApplicationDelegate {
         let enabled = UserDefaults(suiteName: FinderHostLocation.bundleID)?.object(forKey: "files.enabled") as? Bool ?? true
         if !enabled && !isTest {
             NoticeCenter.shared.report(UserFacingError("访达与文件功能已停用，请在 iTools 设置中开启。"))
-        } else if request.paths.contains(where: { !AdvancedFiles.exists($0) }) {
+        } else if FinderActions.action(request.action)?.requiresPaths == true,
+                  request.paths.contains(where: { !AdvancedFiles.exists($0) }) {
             NoticeCenter.shared.report(UserFacingError("所选项目已移动、删除或无法访问。请重新选择后重试。"))
         } else {
             files.performAction(request.action)
@@ -134,6 +137,11 @@ final class FinderActionDelegate: NSObject, NSApplicationDelegate {
             panel.title = "iTools · " + (FinderActions.action(request.action)?.title ?? "访达操作")
             panel.isReleasedWhenClosed = false; panel.level = .floating
             panel.collectionBehavior = [.moveToActiveSpace, .fullScreenAuxiliary]
+            panel.isOpaque = false; panel.backgroundColor = .clear
+            panel.titlebarAppearsTransparent = true; panel.titlebarSeparatorStyle = .none
+            let glass = NSVisualEffectView(frame: panel.contentView?.bounds ?? .zero)
+            glass.material = .hudWindow; glass.blendingMode = .behindWindow; glass.state = .active
+            glass.autoresizingMask = [.width, .height]; panel.contentView = glass
             let spinner = NSProgressIndicator(frame: NSRect(x: 18, y: 63, width: 20, height: 20))
             spinner.style = .spinning; spinner.startAnimation(nil); panel.contentView?.addSubview(spinner)
             let label = NSTextField(wrappingLabelWithString: "正在处理…")
@@ -156,8 +164,9 @@ final class FinderActionDelegate: NSObject, NSApplicationDelegate {
         Panels.activateIfNeeded()
         let alert = NSAlert(); alert.messageText = title
         let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: 480, height: text.count > 200 ? 280 : 100))
-        scroll.hasVerticalScroller = true; scroll.borderType = .bezelBorder
-        let view = NSTextView(frame: scroll.bounds); view.isEditable = false; view.isSelectable = true
+        scroll.hasVerticalScroller = true; scroll.borderType = .noBorder
+        scroll.drawsBackground = false; scroll.contentView.drawsBackground = false
+        let view = NSTextView(frame: scroll.bounds); view.isEditable = false; view.isSelectable = true; view.drawsBackground = false
         view.font = .systemFont(ofSize: 13); view.string = text
         view.textContainerInset = NSSize(width: 10, height: 10)
         view.isVerticallyResizable = true; view.autoresizingMask = [.width]

@@ -9,6 +9,7 @@ final class FloatingToolPanel: NSPanel {
     init(title: String) {
         super.init(contentRect: .zero, styleMask: [.titled, .closable, .fullSizeContentView, .nonactivatingPanel], backing: .buffered, defer: false)
         self.title = title; titleVisibility = .hidden; titlebarAppearsTransparent = true
+        isOpaque = false; backgroundColor = .clear; hasShadow = true; titlebarSeparatorStyle = .none
         isReleasedWhenClosed = false; isFloatingPanel = true; level = .floating; hidesOnDeactivate = false
         collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]; isMovableByWindowBackground = true
         standardWindowButton(.closeButton)?.isHidden = true

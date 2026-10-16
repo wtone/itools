@@ -208,7 +208,7 @@ final class QuickPanelController: NSObject, NSWindowDelegate {
         NSApp.appearance = NSAppearance(named: .aqua)
         let compact = NSHostingView(rootView: view().frame(width: 540, height: 500).environment(\.colorScheme, .light))
         try export(compact, size: NSSize(width: 540, height: 500), appearance: .aqua, name: "quick-panel-compact", destination: destination)
-        let settings = NSHostingView(rootView: GlassScrollView(softIndicators: true) { QuickPanelSettingsView(preferences: model.quickPanel).padding(20) }.frame(width: 540, height: 920).background(Color(NSColor.windowBackgroundColor)).environment(\.colorScheme, .light))
+        let settings = NSHostingView(rootView: GlassScrollView(softIndicators: true) { QuickPanelSettingsView(preferences: model.quickPanel).padding(20) }.frame(width: 540, height: 920).background(FrostedBackground()).environment(\.colorScheme, .light))
         try export(settings, size: NSSize(width: 540, height: 920), appearance: .aqua, name: "quick-panel-settings", destination: destination)
         let cleaning = NSHostingView(rootView: CleaningView(service: model.cleaning).frame(width: 800, height: 500))
         try export(cleaning, size: NSSize(width: 800, height: 500), appearance: .darkAqua, name: "cleaning-preview", destination: destination)

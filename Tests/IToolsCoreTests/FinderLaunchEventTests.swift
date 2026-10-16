@@ -4,6 +4,15 @@ import Carbon
 @testable import IToolsCore
 
 final class FinderLaunchEventTests: XCTestCase {
+    func testVisibilityToggleUsesQuietHostLaunchAndPreservesRequestIdentity() throws {
+        let menu = try XCTUnwrap(FinderMenuRequests.makeURL(action: FinderActions.visibilityActionID, paths: []))
+        let url = try XCTUnwrap(FinderDirectRequest.makeURL(from: menu))
+        let config = try XCTUnwrap(FinderLaunchEvent.configuration(for: [url]))
+        XCTAssertEqual(config.arguments, [FinderLaunchEvent.hostActionArgument])
+        XCTAssertFalse(config.activates)
+        XCTAssertEqual(FinderLaunchEvent.requests(in: try XCTUnwrap(config.appleEvent)), [url])
+        XCTAssertTrue(try XCTUnwrap(FinderLaunchEvent.configuration(for: [request()])).arguments.isEmpty)
+    }
     private func request(_ action: String = "new-txt") -> URL {
         FinderDirectRequest.makeURL(from: FinderMenuRequests.makeURL(action: action,
             paths: [URL(fileURLWithPath: "/tmp/中文 & 空格 #?.txt")])!)!

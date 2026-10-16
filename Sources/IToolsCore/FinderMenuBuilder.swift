@@ -41,6 +41,9 @@ public final class FinderMenuBuilder {
             addApplications(title: topLevel ? "iTools · 打开方式" : "打开方式", paths: files, to: menu)
         } else {
             add(title, action: action.id, paths: action.directory ? directory : files, to: menu)
+            if action.id == FinderActions.visibilityActionID {
+                menu.items.last?.toolTip = "相当于访达中的 ⌘⇧.，即时切换当前窗口的隐藏项目显示。"
+            }
         }
         if topLevel, let group = FinderActions.groups.first(where: { $0.actions.contains { $0.id == action.id } }) {
             menu.items.last?.image = NSImage(systemSymbolName: group.icon, accessibilityDescription: "iTools")

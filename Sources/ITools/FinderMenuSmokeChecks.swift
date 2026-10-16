@@ -45,7 +45,28 @@ enum FinderMenuSmokeChecks {
             }
         }
         let empty = builder.menu(layout: .common, files: [], directory: [])
-        try check(leaves(empty).allSatisfy { !$0.isEnabled && $0.tag == 0 }, "empty selection enabled commands")
+        for item in leaves(empty) {
+            if let url = store.request(tag: item.tag), let encoded = FinderDirectRequest.makeURL(from: url),
+               let request = FinderDirectRequest(encoded) {
+                try check(FinderActions.action(request.action)?.requiresPaths == false && item.isEnabled && request.paths.isEmpty,
+                          "empty selection enabled a file command")
+            } else { try check(!item.isEnabled && item.tag == 0, "empty selection lost disabled file command") }
+        }
+        do {
+            let visibilityBuilder = FinderMenuBuilder(requests: store, target: callback, selector: #selector(Callback.invoke(_:)),
+                applicationLookup: { _ in [] })
+            for layout in [FinderMenuLayout(), FinderMenuLayout(topLevelIDs: [FinderActions.visibilityActionID])] {
+                let menu = visibilityBuilder.menu(layout: layout, files: [], directory: [])
+                for id in [FinderActions.visibilityActionID] {
+                    let item = leaves(menu).first { item in
+                        guard let url = store.request(tag: item.tag), let encoded = FinderDirectRequest.makeURL(from: url) else { return false }
+                        return FinderDirectRequest(encoded)?.action == id
+                    }
+                    try check(item?.isEnabled == true && item?.state == .off,
+                              "hidden-files toggle must be neutral and enabled without selection")
+                }
+            }
+        }
         let preferences = FinderMenuPreferences(persist: false)
         let saved = FinderMenuLayout.load()
         preferences.apply(.common)
@@ -61,6 +82,7 @@ enum FinderMenuSmokeChecks {
             host.appearance = NSAppearance(named: appearance)
             RunLoop.main.run(until: Date().addingTimeInterval(0.15))
             host.layoutSubtreeIfNeeded(); host.displayIfNeeded()
+            try WindowGlassChecks.verifyMaterial(window, material: .hudWindow)
             guard let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) else { throw UserFacingError("Finder settings bitmap failed") }
             host.cacheDisplay(in: host.bounds, to: rep)
             try rep.representation(using: .png, properties: [:])!.write(to: destination.appendingPathComponent(name + ".png"))
@@ -68,6 +90,6 @@ enum FinderMenuSmokeChecks {
         preferences.set("terminal", enabled: false)
         try check(!preferences.layout.topLevelIDs.contains("terminal"), "toggle did not update selection")
         try check(FinderMenuLayout.load() == saved, "smoke changed the user's layout")
-        print("PASS: actual Finder NSMenu none/mixed/all placement; 47 actions preserved; no duplicate promoted actions; tag-only paths; native open-with choices; settings light/dark; user layout untouched")
+        print("PASS: actual Finder NSMenu none/mixed/all placement; \(FinderActions.all.count) actions preserved; hidden-file state and selection-free routes; no duplicate promoted actions; tag-only paths; native open-with choices; settings light/dark; user layout untouched")
     }
 }

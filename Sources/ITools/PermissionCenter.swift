@@ -52,15 +52,17 @@ final class PermissionCenter: NSObject, ObservableObject, NSWindowDelegate {
         accessibility = status.0; eventPosting = status.1; screen = status.2; microphone = status.3
     }
     var allowed: Bool {
-        switch kind { case .accessibility: return accessibility && (operation != "直接粘贴" && operation != "锁屏" || eventPosting)
+        switch kind { case .accessibility: return accessibility && (!["直接粘贴", "锁屏", "显示/不显示隐藏文件"].contains(operation) || eventPosting)
         case .screen: return screen; case .microphone: return microphone == .authorized; case .automation: return false }
     }
     func show(_ kind: PermissionKind, operation: String = "") {
         self.kind = kind; self.operation = operation; feedback = ""; refresh()
         preparePresentation?()
         if panel == nil {
-            let window = PermissionPanel(contentRect: NSRect(x: 0, y: 0, width: 560, height: 460), styleMask: [.titled, .closable], backing: .buffered, defer: false)
+            let window = PermissionPanel(contentRect: NSRect(x: 0, y: 0, width: 560, height: 460), styleMask: [.titled, .closable, .fullSizeContentView], backing: .buffered, defer: false)
             window.title = "iTools · 权限与运行状态"; window.isReleasedWhenClosed = false
+            window.isOpaque = false; window.backgroundColor = .clear
+            window.titleVisibility = .hidden; window.titlebarAppearsTransparent = true; window.titlebarSeparatorStyle = .none
             window.level = .modalPanel; window.hidesOnDeactivate = true
             window.collectionBehavior = [.moveToActiveSpace, .fullScreenAuxiliary]
             window.delegate = self
@@ -130,7 +132,7 @@ private struct PermissionHelpView: View {
                 Button("打开系统设置") { center.openSettings(center.kind) }.keyboardShortcut(.defaultAction)
             }
         }.padding(24).frame(width: 560, height: 460)
-            .background(Color(NSColor.windowBackgroundColor)).buttonStyle(ToolButtonStyle())
+            .background(FrostedBackground()).buttonStyle(ToolButtonStyle())
     }
     private var instructions: String {
         switch center.kind {

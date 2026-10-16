@@ -329,7 +329,7 @@ struct ScrollingCaptureHUD: View {
                 }.controlSize(.small)
             }
         }.padding(16).frame(width: 440, height: 176)
-            .background(.regularMaterial).cornerRadius(14)
+            .background(FrostedBackground()).cornerRadius(14)
             .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.primary.opacity(0.08)))
     }
 }

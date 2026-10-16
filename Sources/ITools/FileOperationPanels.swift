@@ -35,10 +35,11 @@ final class FileRenamePanel: NSObject, NSTextFieldDelegate {
             }
         }
         let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: 470, height: 180))
-        scroll.hasVerticalScroller = true; scroll.borderType = .bezelBorder
+        scroll.hasVerticalScroller = true; scroll.borderType = .noBorder
+        scroll.drawsBackground = false; scroll.contentView.drawsBackground = false
         scroll.widthAnchor.constraint(equalToConstant: 470).isActive = true
         scroll.heightAnchor.constraint(equalToConstant: 180).isActive = true
-        preview.frame = scroll.bounds; preview.isEditable = false; preview.isSelectable = true
+        preview.frame = scroll.bounds; preview.isEditable = false; preview.isSelectable = true; preview.drawsBackground = false
         preview.font = .systemFont(ofSize: 13); preview.textContainerInset = NSSize(width: 8, height: 8)
         preview.isVerticallyResizable = true; preview.autoresizingMask = [.width]; preview.textContainer?.widthTracksTextView = true
         scroll.documentView = preview; stack.addArrangedSubview(scroll)
@@ -80,17 +81,15 @@ final class FileRenamePanel: NSObject, NSTextFieldDelegate {
     func renderPreview() -> NSView { alert.layout(); return alert.window.contentView! }
 }
 
-final class FileDeletionConfirmation: NSObject, NSTextFieldDelegate {
+final class FileDeletionConfirmation {
     private let alert = NSAlert()
-    private let field = NSTextField(string: "")
     init(files: [URL]) {
-        super.init()
+        alert.alertStyle = .warning
         alert.messageText = "彻底删除 \(files.count) 项？"
-        alert.informativeText = "删除后无法从废纸篓恢复。输入「彻底删除」以确认。\n" + files.prefix(12).map(\.path).joined(separator: "\n") + (files.count > 12 ? "\n…共 \(files.count) 项" : "")
-        field.frame = NSRect(x: 0, y: 0, width: 420, height: 26); field.placeholderString = "彻底删除"; field.delegate = self
-        alert.accessoryView = field; alert.addButton(withTitle: "彻底删除"); alert.addButton(withTitle: "取消")
-        alert.buttons.first?.isEnabled = false; alert.window.initialFirstResponder = field
+        alert.informativeText = "删除后无法从废纸篓恢复，请确认要删除以下项目。\n" + files.prefix(12).map(\.path).joined(separator: "\n") + (files.count > 12 ? "\n…共 \(files.count) 项" : "")
+        alert.addButton(withTitle: "彻底删除").hasDestructiveAction = true
+        alert.addButton(withTitle: "取消")
     }
-    func controlTextDidChange(_ obj: Notification) { alert.buttons.first?.isEnabled = field.stringValue == "彻底删除" }
-    func run() -> Bool { Panels.activateIfNeeded(); return alert.runModal() == .alertFirstButtonReturn && field.stringValue == "彻底删除" }
+    func run() -> Bool { Panels.activateIfNeeded(); return alert.runModal() == .alertFirstButtonReturn }
+    func renderPreview() -> NSView { alert.layout(); return alert.window.contentView! }
 }

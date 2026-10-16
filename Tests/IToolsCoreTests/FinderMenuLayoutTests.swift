@@ -2,6 +2,14 @@ import XCTest
 @testable import IToolsCore
 
 final class FinderMenuLayoutTests: XCTestCase {
+    func testSeparateVisibilityItemsBecomeOneWithoutLosingTopLevelPlacement() {
+        for previous in [["show-hidden-files"], ["hide-hidden-files"], ["show-hidden-files", "hide-hidden-files"]] {
+            let layout = FinderMenuLayout.decode(previous + ["terminal", "future-operation"])
+            XCTAssertEqual(layout.topLevelIDs, [FinderActions.visibilityActionID, "terminal", "future-operation"])
+            XCTAssertEqual(layout.topLevelActions.filter { $0.id == FinderActions.visibilityActionID }.count, 1)
+            XCTAssertFalse(layout.remainingGroups.flatMap(\.actions).contains { $0.id == FinderActions.visibilityActionID })
+        }
+    }
     func testNewInstallKeepsAllActionsInSubmenu() {
         let layout = FinderMenuLayout.decode(nil)
         XCTAssertTrue(layout.topLevelActions.isEmpty)

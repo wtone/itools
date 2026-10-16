@@ -1,14 +1,20 @@
 import AppKit
 import ObjectiveC
+import Combine
 import SystemBridge
 import IToolsCore
 
-/// A native status item confined to the system primary display. AppKit has no public
+/// A native status item confined to one selected display. AppKit has no public
 /// per-display replication switch. A checked compatibility callback keeps the
 /// public factory, AppKit observation, and native status-bar layout intact.
 final class MenuBarDisplayScope {
     private let item: NSStatusItem
     private let confined: Bool
+    private let preferences: MenuBarPreferences?
+    private var preferenceSubscription: AnyCancellable?
+    private let pinnedDisplayID: String?
+    private var appliedSelection: MenuBarDisplaySelection?
+    private var appliedDisplayID: String?
     private var observers: [NSObjectProtocol] = []
     private var workspaceObservers: [NSObjectProtocol] = []
     private var timer: Timer?
@@ -47,7 +53,26 @@ final class MenuBarDisplayScope {
         return true
     }
 
-    static func isPrimaryScreen(_ point: NSPoint) -> Bool { NSScreen.screens.first?.frame.contains(point) == true }
+    struct ScreenOption: Identifiable, Equatable {
+        let id: String
+        let name: String
+    }
+    static var availableScreens: [ScreenOption] {
+        NSScreen.screens.enumerated().compactMap { index, screen in
+            guard let id = identifier(screen) else { return nil }
+            return ScreenOption(id: id, name: "\(screen.localizedName)（屏幕 \(index + 1)\(index == 0 ? " · 主屏" : "")）")
+        }
+    }
+    static func resolvedScreens(for selection: MenuBarDisplaySelection) -> [NSScreen] {
+        let screens = NSScreen.screens
+        if selection.mode == .all { return screens }
+        let ids = selection.resolvedDisplayIDs(available: screens.compactMap(identifier), primary: screens.first.flatMap(identifier))
+        let matched = screens.filter { screen in identifier(screen).map(ids.contains) == true }
+        return matched.isEmpty ? Array(screens.prefix(1)) : matched
+    }
+    static func allowsMenuBar(at point: NSPoint, selection: MenuBarDisplaySelection) -> Bool {
+        resolvedScreens(for: selection).contains { $0.frame.contains(point) }
+    }
     static func buttonScreenRect(_ button: NSStatusBarButton, includeWindowFrame: Bool = false) -> NSRect? {
         guard let window = button.window else { return nil }
         // Confinement can leave AppKit's cached frame on the formerly active bar.
@@ -79,8 +104,10 @@ final class MenuBarDisplayScope {
         return string as String
     }
 
-    init(item: NSStatusItem, initializeOnLeft: Bool, placementRecovery: (() -> Bool)? = nil) {
+    init(item: NSStatusItem, initializeOnLeft: Bool, preferences: MenuBarPreferences? = nil, pinnedDisplayID: String? = nil, placementRecovery: (() -> Bool)? = nil) {
         self.item = item
+        self.preferences = preferences
+        self.pinnedDisplayID = pinnedDisplayID
         self.placementRecovery = placementRecovery
         defaultPlacementPending = initializeOnLeft
         confined = it_primary_status_item_is_confined(Unmanaged.passUnretained(item).toOpaque()) != 0
@@ -96,14 +123,36 @@ final class MenuBarDisplayScope {
         }
         let timer = Timer(timeInterval: 0.5, repeats: true) { [weak self] _ in self?.refresh() }
         timer.tolerance = 0.2; self.timer = timer; RunLoop.main.add(timer, forMode: .common)
+        preferenceSubscription = preferences?.$displaySelection.dropFirst().sink { [weak self] _ in self?.scheduleRefresh() }
         refresh()
     }
 
     func refresh() {
         guard active, !validating else { return }
-        // NSScreen.main follows keyboard focus; screens.first identifies the system primary.
-        apply(screen: NSScreen.screens.first)
+        if pinnedDisplayID == nil, preferences?.displaySelection.mode == .all, !confined {
+            item.isVisible = !NSScreen.screens.isEmpty
+            return
+        }
+        let selection = effectiveSelection
+        let target = Self.resolvedScreens(for: selection).first
+        let targetID = target.flatMap(Self.identifier)
+        if appliedSelection != selection || appliedDisplayID != targetID {
+            leftPlacement = nil; invalidPlacementSince = nil; repairedInvalidPlacement = false
+            appliedSelection = selection; appliedDisplayID = targetID
+        }
+        // A replica being removed must not temporarily fall back onto the root.
+        if let pinnedDisplayID, !NSScreen.screens.contains(where: { Self.identifier($0) == pinnedDisplayID }) {
+            apply(screen: nil); return
+        }
+        apply(screen: target)
     }
+
+    private var effectiveSelection: MenuBarDisplaySelection {
+        if let pinnedDisplayID { return .init(displayID: pinnedDisplayID) }
+        let selection = preferences?.displaySelection ?? MenuBarDisplaySelection()
+        return selection.mode == .all ? .init() : selection
+    }
+    var placementScreen: NSScreen? { Self.resolvedScreens(for: effectiveSelection).first }
 
     private func apply(screen: NSScreen?) {
         guard let screen = screen else { item.isVisible = false; return }
@@ -117,6 +166,10 @@ final class MenuBarDisplayScope {
         if !item.isVisible { item.isVisible = true }
         let pinned = identifier.withCString { it_primary_status_item_pin(Unmanaged.passUnretained(item).toOpaque(), $0) != 0 }
         guard pinned else { item.isVisible = false; return }
+        maintainPlacement(on: screen)
+    }
+
+    private func maintainPlacement(on screen: NSScreen) {
         // AppKit can retain visible=true while a rapid resize has ordered the
         // backing window out of the compositor. Recover only this original
         // primary window, after its real bounds are safe and the bar is shown.
@@ -227,6 +280,7 @@ final class MenuBarDisplayScope {
     func stop() {
         guard active else { return }
         active = false; timer?.invalidate(); timer = nil; leftPlacement = nil
+        preferenceSubscription?.cancel(); preferenceSubscription = nil
         for observer in observers { NotificationCenter.default.removeObserver(observer) }; observers.removeAll()
         for observer in workspaceObservers { NSWorkspace.shared.notificationCenter.removeObserver(observer) }; workspaceObservers.removeAll()
         // The owner removes the item or exits. Do not persist a hidden-item
@@ -299,7 +353,14 @@ final class MenuBarDisplayScope {
             // A new autosave name can change a registry value without moving
             // its existing compositor slot. Explicitly install the test slot.
             _ = installPosition(0)
-            settle()
+            let deadline = Date().addingTimeInterval(3)
+            repeat {
+                RunLoop.main.run(until: Date().addingTimeInterval(0.1))
+                if let button = item.button, Self.isWindowOnScreen(button),
+                   let frame = Self.buttonScreenRect(button, includeWindowFrame: true),
+                   screen.frame.contains(frame), abs(frame.maxY - screen.frame.maxY) < 1 { break }
+                apply(screen: screen)
+            } while Date() < deadline
         }
         defer {
             NSStatusBar.system.removeStatusItem(witness); item.length = originalLength

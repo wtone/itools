@@ -36,10 +36,13 @@ final class IToolsFinderSync: FIFinderSync {
               let configuration = FinderLaunchEvent.configuration(for: [request]) else {
             showFailure("访达请求无效，请重新打开右键菜单后重试。"); return
         }
-        launch(hosts, configuration: configuration)
+        launch(hosts, configuration: configuration,
+               inHost: FinderDirectRequest(request)?.action == FinderActions.visibilityActionID)
     }
-    private func launch(_ hosts: [URL], configuration: NSWorkspace.OpenConfiguration) {
-        NSWorkspace.shared.openApplication(at: FinderHostLocation.worker(in: hosts[0]), configuration: configuration) { [weak self] app, error in
+    private func launch(_ hosts: [URL], configuration: NSWorkspace.OpenConfiguration, inHost: Bool) {
+        // Keyboard access belongs to the main app's existing Accessibility permission.
+        let application = inHost ? hosts[0] : FinderHostLocation.worker(in: hosts[0])
+        NSWorkspace.shared.openApplication(at: application, configuration: configuration) { [weak self] app, error in
             DispatchQueue.main.async {
                 guard let self = self else { return }
                 guard let error = error as NSError? else {
@@ -54,7 +57,7 @@ final class IToolsFinderSync: FIFinderSync {
                     ($0.domain == NSOSStatusErrorDomain && [-43, -10811, -10814, -10827].contains($0.code)) ||
                     ($0.domain == NSCocoaErrorDomain && [NSFileNoSuchFileError, NSFileReadNoSuchFileError].contains($0.code))
                 }
-                if hosts.count > 1 && app == nil && missing { self.launch(Array(hosts.dropFirst()), configuration: configuration) }
+                if hosts.count > 1 && app == nil && missing { self.launch(Array(hosts.dropFirst()), configuration: configuration, inHost: inHost) }
                 else { self.showFailure("无法启动访达操作组件：\(error.localizedDescription)\n请重新打开完整的 iTools.app 后重试。\n错误代码：\(underlying.domain) \(underlying.code)") }
             }
         }

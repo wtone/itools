@@ -8,6 +8,7 @@ public enum FinderLaunchEvent {
     public static let eventClass = AEEventClass(kCoreEventClass)
     public static let eventID = AEEventID(kAEOpenApplication)
     public static let requestsKey = AEKeyword(0x69547271) // iTrq
+    public static let hostActionArgument = "--finder-visibility-action"
 
     public static func configuration(for urls: [URL]) -> NSWorkspace.OpenConfiguration? {
         guard !urls.isEmpty, urls.count <= 20, urls.allSatisfy({ FinderDirectRequest($0) != nil }) else { return nil }
@@ -23,6 +24,9 @@ public enum FinderLaunchEvent {
         configuration.promptsUserIfNeeded = false
         configuration.allowsRunningApplicationSubstitution = false
         configuration.appleEvent = event
+        if urls.allSatisfy({ FinderDirectRequest($0)?.action == FinderActions.visibilityActionID }) {
+            configuration.arguments = [hostActionArgument]
+        }
         return configuration
     }
 

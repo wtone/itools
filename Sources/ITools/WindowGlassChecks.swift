@@ -1,7 +1,42 @@
 import AppKit
+import SwiftUI
 import IToolsCore
 
 enum WindowGlassChecks {
+    static func verifyMaterial(_ window: NSWindow, material: NSVisualEffectView.Material) throws {
+        guard !window.isOpaque, window.backgroundColor.alphaComponent == 0, let content = window.contentView else {
+            throw UserFacingError("Glass: utility window has an opaque canvas")
+        }
+        if !NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency {
+            guard descendants(content).compactMap({ $0 as? NSVisualEffectView }).contains(where: {
+                $0.identifier?.rawValue == "itools.window-glass" && $0.material == material && $0.blendingMode == .behindWindow
+            }) else { throw UserFacingError("Glass: utility window is missing its native material") }
+        }
+    }
+    static func verifyAccessibilityFallback(destination: URL) throws {
+        for dark in [false, true] {
+            let view = NSHostingView(rootView: VStack(alignment: .leading, spacing: 16) {
+                Text("减少透明度").font(.title2)
+                Text("系统辅助功能开启时，界面使用实色背景。")
+                Text("卡片与文字保持清晰").padding(20).instrumentSurface()
+                Button("原生交互保持可用") {}
+            }.padding(24).frame(width: 500, height: 230).background(FrostedBackground())
+                .buttonStyle(ToolButtonStyle()).environment(\.colorScheme, dark ? .dark : .light))
+            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 500, height: 230), styleMask: .borderless, backing: .buffered, defer: false)
+            window.isReleasedWhenClosed = false; window.contentView = view
+            window.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
+            view.layoutSubtreeIfNeeded()
+            let hasGlass = descendants(view).compactMap({ $0 as? NSVisualEffectView }).contains { $0.identifier?.rawValue == "itools.window-glass" }
+            guard hasGlass != NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency else {
+                throw UserFacingError("Glass: material does not respect the system transparency setting")
+            }
+            guard let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { throw UserFacingError("Glass: fallback export failed") }
+            view.cacheDisplay(in: view.bounds, to: bitmap)
+            try bitmap.representation(using: .png, properties: [:])?.write(to: destination.appendingPathComponent(dark ? "glass-accessible-dark.png" : "glass-accessible.png"))
+            window.close()
+        }
+        print("PASS: light/dark native materials follow current accessibility reduce-transparency setting (\(NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency)); system preferences unchanged")
+    }
     /// Inspect and render our complete window, including the system-owned titlebar controls.
     static func verifyAndExport(_ window: NSWindow, destination: URL, name: String) throws {
         guard window.styleMask.contains(.fullSizeContentView), window.titlebarAppearsTransparent,
