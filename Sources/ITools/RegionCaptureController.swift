@@ -5,18 +5,33 @@ import IToolsCore
 
 /// Region screenshots freeze every display before creating any mask or editing control.
 /// The original pixels remain available until completion, so selection changes are lossless.
+enum RegionCaptureResult {
+    case region(AnnotationDocument)
+    case scrolling(displayID: CGDirectDisplayID, pixels: CGRect, automatic: Bool, slow: Bool, targetPID: pid_t?, releaseSelection: () -> Void)
+}
+
+final class RegionCaptureMode: ObservableObject {
+    @Published var scrolling = false
+    @Published var automatic = true
+    @Published var slow = false
+    @Published var message = ""
+}
+
 final class RegionCaptureController {
     private(set) static weak var active: RegionCaptureController?
     private(set) var windows: [SelectionWindow] = []
-    private var completion: ((AnnotationDocument?) -> Void)?
+    private var completion: ((RegionCaptureResult?) -> Void)?
+    private var allowScrolling = true
     private var hiddenWindows: [NSWindow] = []
     private var previousApp: NSRunningApplication?
     private var screenObserver: NSObjectProtocol?
     private var keyMonitor: Any?
     private var pending: DispatchWorkItem?
     private var activeView: RegionCaptureWorkspace?
+    private var targetWindows: [ScrollingCaptureController.CaptureWindowTarget] = []
 
-    func begin(delay: Int = 0, completion: @escaping (AnnotationDocument?) -> Void) {
+    func begin(delay: Int = 0, allowScrolling: Bool = true, completion: @escaping (RegionCaptureResult?) -> Void) {
+        self.allowScrolling = allowScrolling
         guard self.completion == nil, Self.active == nil, !RegionSelector.shared.isSelecting else { completion(nil); return }
         Self.active = self
         self.completion = completion
@@ -49,6 +64,7 @@ final class RegionCaptureController {
     private func install(displays: [CaptureDisplayGeometry], snapshots: [CGImage]) {
         // Window picking follows the same frozen desktop, rather than querying on every mouse move.
         let primaryTop = NSScreen.screens.first?.frame.maxY ?? 0
+        targetWindows = ScrollingCaptureController.visibleTargetWindows()
         let windowRects = (CGWindowListCopyWindowInfo(.optionOnScreenOnly, kCGNullWindowID) as? [[String: Any]] ?? []).compactMap { info -> CGRect? in
             guard info[kCGWindowOwnerPID as String] as? Int32 != ProcessInfo.processInfo.processIdentifier,
                   info[kCGWindowLayer as String] as? Int == 0, (info[kCGWindowAlpha as String] as? Double ?? 1) > 0,
@@ -56,7 +72,7 @@ final class RegionCaptureController {
                   let rect = CGRect(dictionaryRepresentation: bounds) else { return nil }
             return CGRect(x: rect.minX, y: primaryTop-rect.maxY, width: rect.width, height: rect.height)
         }
-        windows = Self.makeWindows(displays: displays, snapshots: snapshots)
+        windows = Self.makeWindows(displays: displays, snapshots: snapshots, allowScrolling: allowScrolling)
         for window in windows {
             guard let view = window.contentView as? RegionCaptureWorkspace else { continue }
             view.windowCandidates = windowRects.compactMap { view.display.localPoints(fromGlobal: $0) }
@@ -68,8 +84,18 @@ final class RegionCaptureController {
                 }
             }
             view.onComplete = { [weak self, weak view] in
-                guard let self = self, let result = view?.selectedDocument() else { return }
-                self.finish(result)
+                guard let self = self, let view = view else { return }
+                if view.mode.scrolling { view.startScrolling(); return }
+                guard let result = view.selectedDocument() else { return }
+                self.finish(.region(result))
+            }
+            view.onScroll = { [weak self, weak view] id, pixels, automatic, slow in
+                guard let self = self, let view = view else { return }
+                let target = view.display.globalPoints(from: pixels).map {
+                    CaptureDisplayGeometry.quartzRect(fromGlobal: $0, primaryTop: primaryTop)
+                }.flatMap { ScrollingCaptureController.targetPID(at: CGPoint(x: $0.midX, y: $0.midY), windows: self.targetWindows) }
+                self.finish(.scrolling(displayID: id, pixels: pixels, automatic: automatic, slow: slow, targetPID: target,
+                                       releaseSelection: { [self] in self.releaseSelectionWindows() }))
             }
             view.onCancel = { [weak self] in self?.cancel() }
         }
@@ -92,6 +118,7 @@ final class RegionCaptureController {
             // Native text input owns composition, Return and Esc while it is editing.
             if view.document.editingTextID != nil { return event }
             if event.keyCode == 53 { self.cancel(); return nil }
+            if view.handleModeShortcut(event) { return nil }
             if event.keyCode == 36 || event.keyCode == 76 {
                 if view.selection != nil { view.onComplete?() }
                 return nil
@@ -108,7 +135,7 @@ final class RegionCaptureController {
         }
     }
 
-    static func makeWindows(displays: [CaptureDisplayGeometry], snapshots: [CGImage]) -> [SelectionWindow] {
+    static func makeWindows(displays: [CaptureDisplayGeometry], snapshots: [CGImage], allowScrolling: Bool = true) -> [SelectionWindow] {
         guard displays.count == snapshots.count else { return [] }
         return zip(displays, snapshots).map { display, snapshot in
             let window = SelectionWindow(contentRect: display.frame, styleMask: .borderless, backing: .buffered, defer: false)
@@ -117,26 +144,33 @@ final class RegionCaptureController {
             window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
             window.acceptsMouseMovedEvents = true
             window.title = "区域截图工作区"
-            let view = RegionCaptureWorkspace(display: display, snapshot: snapshot)
+            let view = RegionCaptureWorkspace(display: display, snapshot: snapshot, allowScrolling: allowScrolling)
             window.contentView = view; window.makeFirstResponder(view)
             return window
         }
     }
 
     func cancel() { finish(nil) }
-    private func finish(_ result: AnnotationDocument?) {
+    private func finish(_ result: RegionCaptureResult?) {
         guard let callback = completion else { return }
         completion = nil; pending?.cancel(); pending = nil
         if Self.active === self { Self.active = nil }
         if let monitor = keyMonitor { NSEvent.removeMonitor(monitor) }; keyMonitor = nil
         if let observer = screenObserver { NotificationCenter.default.removeObserver(observer) }; screenObserver = nil
+        if case .scrolling = result {
+            previousApp?.activate(options: [])
+        } else {
+            releaseSelectionWindows()
+            hiddenWindows.forEach { $0.orderFront(nil) }
+            if hiddenWindows.contains(where: \.canBecomeMain) { NSApp.activate(ignoringOtherApps: true) }
+            else { previousApp?.activate(options: []) }
+        }
+        hiddenWindows.removeAll(); previousApp = nil; targetWindows.removeAll()
+        callback(result)
+    }
+    private func releaseSelectionWindows() {
         windows.forEach { ($0.contentView as? RegionCaptureWorkspace)?.document.commitTextEditing(); $0.close() }
         windows.removeAll(); activeView = nil
-        hiddenWindows.forEach { $0.orderFront(nil) }
-        if hiddenWindows.contains(where: \.canBecomeMain) { NSApp.activate(ignoringOtherApps: true) }
-        else { previousApp?.activate(options: []) }
-        hiddenWindows.removeAll(); previousApp = nil
-        callback(result)
     }
     deinit {
         pending?.cancel()
@@ -155,6 +189,9 @@ final class RegionCaptureWorkspace: NSView {
     var onActivate: (() -> Void)?
     var onComplete: (() -> Void)?
     var onCancel: (() -> Void)?
+    var onScroll: ((CGDirectDisplayID, CGRect, Bool, Bool) -> Void)?
+    let mode = RegionCaptureMode()
+    let allowScrolling: Bool
     var isActive = true { didSet { refreshSelection() } }
     var spaceToMove = false
     var windowPickMode = false
@@ -181,8 +218,8 @@ final class RegionCaptureWorkspace: NSView {
                width: rect.width * pixelScaleX, height: rect.height * pixelScaleY)
     }
 
-    init(display: CaptureDisplayGeometry, snapshot: CGImage) {
-        self.display = display; self.snapshot = snapshot
+    init(display: CaptureDisplayGeometry, snapshot: CGImage, allowScrolling: Bool = true) {
+        self.display = display; self.snapshot = snapshot; self.allowScrolling = allowScrolling
         let image = NSImage(cgImage: snapshot, size: NSSize(width: snapshot.width, height: snapshot.height))
         let document = AnnotationDocument(image: image)
         let captureScale = CGFloat(snapshot.width) / display.frame.width
@@ -196,7 +233,7 @@ final class RegionCaptureWorkspace: NSView {
         let glass = NSVisualEffectView()
         glass.material = .hudWindow; glass.blendingMode = .withinWindow; glass.state = .active
         glass.wantsLayer = true; glass.layer?.cornerRadius = 12; glass.layer?.masksToBounds = true
-        let host = NSHostingView(rootView: RegionCaptureToolbar(document: document, pixelScale: captureScale,
+        let host = NSHostingView(rootView: RegionCaptureToolbar(document: document, mode: mode, workspace: self, pixelScale: captureScale,
                                                               reselect: { [weak self] in self?.reselect() },
                                                               complete: { [weak self] in self?.onComplete?() },
                                                               cancel: { [weak self] in self?.onCancel?() }))
@@ -247,17 +284,21 @@ final class RegionCaptureWorkspace: NSView {
         if let rect = rect, !canvas.isHidden {
             canvas.imageRectOverride = CGRect(x: -rect.minX, y: -rect.minY, width: bounds.width, height: bounds.height)
             canvas.frame = rect; canvas.update(document: document)
-            let width = min(610, bounds.width-24), height: CGFloat = 104
-            let x = min(bounds.maxX-width-12, max(12, rect.maxX-width))
-            let y: CGFloat
-            if rect.minY >= height+20 { y = rect.minY-height-12 }
-            else if bounds.maxY-rect.maxY >= height+20 { y = rect.maxY+12 }
-            else { y = min(bounds.maxY-height-12, max(12, rect.minY+12)) }
-            toolbar.frame = CGRect(x: x, y: y, width: width, height: height)
+            toolbar.frame = Self.toolbarFrame(selection: rect, bounds: bounds)
             toolbar.subviews.first?.frame = toolbar.bounds
         }
         window?.invalidateCursorRects(for: self)
         needsDisplay = true; chrome.needsDisplay = true
+    }
+
+    static func toolbarFrame(selection rect: CGRect, bounds: CGRect) -> CGRect {
+        let width = min(610, bounds.width-24), height: CGFloat = 132
+        let x = min(bounds.maxX-width-12, max(bounds.minX+12, rect.maxX-width))
+        let y: CGFloat
+        if rect.minY-bounds.minY >= height+20 { y = rect.minY-height-12 }
+        else if bounds.maxY-rect.maxY >= height+20 { y = rect.maxY+12 }
+        else { y = min(bounds.maxY-height-12, max(bounds.minY+12, rect.minY+12)) }
+        return CGRect(x: x, y: y, width: width, height: height)
     }
 
     override func draw(_ dirtyRect: NSRect) {
@@ -377,6 +418,28 @@ final class RegionCaptureWorkspace: NSView {
     private func windowRect(at point: CGPoint) -> CGRect? {
         windowCandidates.first { $0.contains(point) }
     }
+    @discardableResult func handleModeShortcut(_ event: NSEvent) -> Bool {
+        guard event.type == .keyDown, event.keyCode == 48, !event.isARepeat, allowScrolling,
+              selection != nil, document.editingTextID == nil,
+              event.modifierFlags.intersection([.command, .control, .option]).isEmpty else { return false }
+        mode.scrolling.toggle(); return true
+    }
+    func startScrolling() {
+        guard let selection = selection, selection.width >= 80, selection.height >= 100,
+              let pixels = document.captureRegion?.integral else {
+            mode.message = "请将选区调整到至少 80 × 100 点"; return
+        }
+        canvas.commitInlineTextEditing(); document.commitTextEditing()
+        mode.message = ""
+        if !document.marks.isEmpty {
+            let alert = NSAlert(); alert.messageText = "开始长截图？"
+            alert.informativeText = "长截图使用实时画面，当前选区的标注不会保留。"
+            alert.addButton(withTitle: "开始捕获"); alert.addButton(withTitle: "取消")
+            alert.window.level = NSWindow.Level(rawValue: NSWindow.Level.screenSaver.rawValue + 1)
+            guard alert.runModal() == .alertFirstButtonReturn else { return }
+        }
+        onScroll?(display.id, pixels, mode.automatic, mode.slow)
+    }
     func selectedDocument() -> AnnotationDocument? {
         canvas.commitInlineTextEditing()
         document.commitTextEditing()
@@ -425,8 +488,18 @@ final class RegionAnnotationCanvas: CanvasView {
     }
 }
 
+struct CaptureModeTabs: View {
+    @Binding var scrolling: Bool
+    var body: some View {
+        Picker("截图模式", selection: $scrolling) { Text("区域截图").tag(false); Text("长截图").tag(true) }
+            .pickerStyle(.segmented).labelsHidden().frame(width: 190)
+    }
+}
+
 private struct RegionCaptureToolbar: View {
     @ObservedObject var document: AnnotationDocument
+    @ObservedObject var mode: RegionCaptureMode
+    unowned let workspace: RegionCaptureWorkspace
     let pixelScale: CGFloat
     let reselect: () -> Void
     let complete: () -> Void
@@ -434,6 +507,26 @@ private struct RegionCaptureToolbar: View {
     private let tools: [MarkTool] = [.select, .rectangle, .ellipse, .arrow, .line, .pen, .text, .fill, .redact]
     var body: some View {
         VStack(spacing: 9) {
+            if workspace.allowScrolling {
+                HStack {
+                    CaptureModeTabs(scrolling: $mode.scrolling)
+                    Text("Tab 切换").font(.system(size: 10)).foregroundColor(.secondary)
+                    Spacer()
+                }
+            }
+            if mode.scrolling {
+                HStack {
+                    Picker("滚动方式", selection: $mode.automatic) { Text("自动").tag(true); Text("手动").tag(false) }
+                        .pickerStyle(.segmented).labelsHidden().frame(width: 110)
+                    Toggle("慢速", isOn: $mode.slow).toggleStyle(.checkbox).font(.system(size: 11))
+                        .disabled(!mode.automatic)
+                    Text(mode.message.isEmpty ? "使用当前选区捕获实时滚动画面" : mode.message)
+                        .font(.system(size: 11)).foregroundColor(mode.message.isEmpty ? .secondary : .red)
+                    Spacer()
+                    Button("取消", action: cancel)
+                    Button("开始捕获", action: complete).buttonStyle(RegionCaptureCompleteStyle())
+                }
+            } else {
             HStack(spacing: 5) {
                 ForEach(tools) { tool in
                     Button { document.tool = tool; document.select(nil) } label: {
@@ -476,11 +569,13 @@ private struct RegionCaptureToolbar: View {
             Text(document.editingTextID != nil ? "双击文字原位编辑 · 点击其他位置保存 · Esc 取消编辑" :
                  "拖动边缘或控制点调整选区 · 空格拖动移动选区 · 悬停标注可修改 · Enter 完成")
                 .font(.system(size: 10)).foregroundColor(.secondary).frame(maxWidth: .infinity, alignment: .leading)
+            }
         }.padding(10).buttonStyle(.bordered).controlSize(.small)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 }
 
-private struct RegionCaptureCompleteStyle: ButtonStyle {
+struct RegionCaptureCompleteStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label.font(.system(size: 11, weight: .semibold)).foregroundColor(.white)
             .padding(.horizontal, 9).padding(.vertical, 5)

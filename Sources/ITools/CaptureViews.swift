@@ -12,13 +12,11 @@ struct CapturePage: View {
             Picker("工具", selection: $tab) { Text("截图与标注").tag(0); Text("录屏与录音").tag(1) }.pickerStyle(.segmented).frame(width: 340)
             if tab == 0 {
                 HStack {
-                    Button { capture.capture() } label: { Label("区域截图", systemImage: "viewfinder") }.buttonStyle(.borderedProminent)
-                    Button("长截图") { capture.startLongCapture() }.help("在任意显示器框选滚动内容，选区透明，周围保留灰色蒙层")
+                    Button { capture.capture() } label: { Label("截图", systemImage: "viewfinder") }.buttonStyle(.borderedProminent)
                     Button("全屏") { capture.capture(fullScreen: true) }
                     Button("延时 3 秒") { capture.capture(delay: 3) }
                     Button("打开图片") { capture.openImage() }
                     Menu("更多") {
-                        Button("手动滚动长截图") { capture.startLongCapture(automatic: false) }
                         Button("纵向拼接图片（按文件名排序）") { capture.stitch() }
                         Button("取色并复制 HEX") { capture.pickColor() }
                         Button("打开截图文件夹") {
@@ -30,7 +28,7 @@ struct CapturePage: View {
                     }.frame(width: 85)
                     if capture.busy { ProgressView().controlSize(.small) }
                 }.disabled(capture.busy)
-                Text("区域截图先框选，再拖动边缘调整大小、移动选区或直接标注；点击「完成并复制」保存到剪贴板。长截图可在任意显示器框选，蒙层持续保留。")
+                Text("框选后可调整选区、直接标注，或按 Tab 切换到长截图并选择滚动方式。")
                     .font(.system(size: 11)).foregroundColor(.secondary)
                 if capture.document.image != nil { EditorView(capture: capture, document: capture.document).padding(16).instrumentSurface() }
                 else { EmptyState(icon: "viewfinder", title: "从一张截图开始", detail: "拖动选择区域，按空格选择窗口，Esc 取消。也可以打开已有图片进行标注。") }

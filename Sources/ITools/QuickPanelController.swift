@@ -107,6 +107,7 @@ final class QuickPanelController: NSObject, NSWindowDelegate {
             if model.awake.active && model.awake.keepsDisplay { model.awake.stop() } else { model.awake.start(minutes: 30, keepDisplay: true) }; return
         }
         if action == .desktopCover { model.quickSystem.toggleDesktopCover(); return }
+        if action == .screenshot && !isShown { close(); model.takeScreenshot(); return }
         afterClosing { [weak self] in
             guard let self = self else { return }
             let model = self.model

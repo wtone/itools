@@ -31,15 +31,21 @@ final class CaptureService: ObservableObject {
         busy = true
         if !fullScreen {
             let controller = RegionCaptureController(); regionController = controller
-            controller.begin(delay: delay) { [weak self] result in
+            controller.begin(delay: delay, allowScrolling: !ocr) { [weak self] result in
                 guard let self = self else { return }
-                self.regionController = nil; self.busy = false
-                guard let result = result else { NoticeCenter.shared.success("已取消截图，原图片和剪贴板保留"); return }
+                self.regionController = nil
+                guard let result = result else { self.busy = false; NoticeCenter.shared.success("已取消截图，原图片和剪贴板保留"); return }
+                if case let .scrolling(displayID, pixels, automatic, slow, targetPID, releaseSelection) = result {
+                    self.startLongCapture(displayID: displayID, pixels: pixels, automatic: automatic, slow: slow, targetPID: targetPID, releaseSelection: releaseSelection)
+                    return
+                }
+                guard case let .region(document) = result else { return }
+                self.busy = false
                 do {
-                    try self.acceptRegionCapture(result)
+                    try self.acceptRegionCapture(document)
                     if restoreWindow || ocr { self.onShow?() }
                     if ocr { self.recognize() }
-                } catch { self.document = result; self.onShow?(); NoticeCenter.shared.report(error) }
+                } catch { self.document = document; self.onShow?(); NoticeCenter.shared.report(error) }
             }
             return
         }
@@ -86,11 +92,9 @@ final class CaptureService: ObservableObject {
         document = AnnotationDocument(image: image); recognizedText = ""
         return copyImage(to: pasteboard)
     }
-    func startLongCapture(automatic: Bool = true) {
-        guard !busy, Permissions.requireScreen() else { return }
-        busy = true
+    private func startLongCapture(displayID: CGDirectDisplayID? = nil, pixels: CGRect? = nil, automatic: Bool = true, slow: Bool = false, targetPID: pid_t? = nil, releaseSelection: (() -> Void)? = nil) {
         let controller = ScrollingCaptureController(); scrollingController = controller
-        controller.select(automatic: automatic) { [weak self] result in
+        let completion: (ScrollingCaptureController.Output?) -> Void = { [weak self] result in
             guard let self = self else { return }
             self.busy = false; self.scrollingController = nil
             guard let result = result else { self.onShow?(); NoticeCenter.shared.success("已取消长截图，原图片和剪贴板保留"); return }
@@ -104,6 +108,11 @@ final class CaptureService: ObservableObject {
                 NoticeCenter.shared.success(result.frames > 1 ? "长截图已保存并复制（\(result.frames) 段），可直接粘贴或继续标注" : "已保存并复制当前区域；尚未追加滚动画面")
             } catch { NoticeCenter.shared.report(error) }
             self.onShow?()
+        }
+        if let displayID = displayID, let pixels = pixels {
+            controller.selectExisting(displayID: displayID, pixels: pixels, automatic: automatic, slow: slow, preferredTargetPID: targetPID, releaseSelection: releaseSelection, completion: completion)
+        } else {
+            controller.select(automatic: automatic, completion: completion)
         }
     }
     func cancelLongCapture() { scrollingController?.cancel() }

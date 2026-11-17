@@ -18,6 +18,7 @@ final class ScrollingCaptureController: ObservableObject {
     @Published var slow = false
     private var toolbar: NSPanel?
     private var overlay: CaptureRegionOverlay?
+    var hasVisibleCaptureMask: Bool { overlay?.captureAnchor?.isVisible == true }
     private var timer: Timer?
     private var globalKeyMonitor: Any?
     private var localKeyMonitor: Any?
@@ -32,6 +33,7 @@ final class ScrollingCaptureController: ObservableObject {
     private var idleFrames = 0
     private var missedFrames = 0
     private var finalSample = false
+    private var startAfterFirstSample = false
     private var pausedForOcclusion = false
     private var nextSampleAt = Date.distantPast
     private var startedAt = Date()
@@ -49,9 +51,9 @@ final class ScrollingCaptureController: ObservableObject {
     }
 
     /// Drive the real asynchronous sampling/timer/finalization path without showing windows or reading the desktop.
-    func prepareSyntheticCheck(mode: Mode, completion: @escaping (Output?) -> Void) {
+    func prepareSyntheticCheck(mode: Mode, autoStart: Bool = false, completion: @escaping (Output?) -> Void) {
         precondition(synthetic && ProcessInfo.processInfo.arguments.contains("--smoke-test"))
-        self.mode = mode; self.completion = completion
+        self.mode = mode; self.completion = completion; startAfterFirstSample = autoStart
         displaySnapshot = NSScreen.screens.compactMap(\.captureGeometry)
         guard let display = displaySnapshot.first else { cancel(); return }
         let selection = CGRect(x: display.frame.minX + 16, y: display.frame.minY + 16, width: 160, height: 120)
@@ -74,7 +76,17 @@ final class ScrollingCaptureController: ObservableObject {
             }
         }
     }
-    private func prepare(displayID: CGDirectDisplayID, pixels: CGRect) {
+    func selectExisting(displayID: CGDirectDisplayID, pixels: CGRect, automatic: Bool, slow: Bool,
+                        preferredTargetPID: pid_t? = nil, releaseSelection: (() -> Void)?, completion: @escaping (Output?) -> Void) {
+        self.completion = completion
+        mode = automatic && Permissions.accessibility ? .automatic : .manual
+        self.slow = slow; startAfterFirstSample = true
+        targetWindows = Self.visibleTargetWindows()
+        prepare(displayID: displayID, pixels: pixels, preferredTargetPID: preferredTargetPID, releaseSelection: releaseSelection)
+    }
+    private func prepare(displayID: CGDirectDisplayID, pixels: CGRect, preferredTargetPID: pid_t? = nil, releaseSelection: (() -> Void)? = nil) {
+        var releaseSelection = releaseSelection
+        defer { releaseSelection?() }
         guard let screen = NSScreen.screens.first(where: { ($0.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? UInt32) == displayID }) else { cancel(); return }
         guard let geometry = screen.captureGeometry, let selected = geometry.globalPoints(from: pixels) else { cancel(); return }
         guard selected.width >= 80, selected.height >= 100 else {
@@ -83,23 +95,24 @@ final class ScrollingCaptureController: ObservableObject {
         displaySnapshot = NSScreen.screens.compactMap(\.captureGeometry)
         let primaryTop = NSScreen.screens.first?.frame.maxY ?? screen.frame.maxY
         captureRect = CaptureDisplayGeometry.quartzRect(fromGlobal: selected, primaryTop: primaryTop)
-        target = Self.targetPID(at: CGPoint(x: captureRect.midX, y: captureRect.midY), windows: targetWindows)
-            .flatMap { NSRunningApplication(processIdentifier: $0) }
+        let resolvedPID = preferredTargetPID ?? Self.targetPID(at: CGPoint(x: captureRect.midX, y: captureRect.midY), windows: targetWindows)
+        target = resolvedPID.flatMap { NSRunningApplication(processIdentifier: $0) }
         if target == nil { mode = .manual }
         targetWindows.removeAll()
         let overlay = CaptureRegionOverlay(displays: displaySnapshot, selectedDisplayID: displayID, selection: selected)
         self.overlay = overlay; overlay.show()
-        let panel = NSPanel(contentRect: CGRect(x: 0, y: 0, width: 440, height: 176), styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+        let panelFrame = RegionCaptureWorkspace.toolbarFrame(selection: selected, bounds: screen.frame)
+        let panel = NSPanel(contentRect: panelFrame, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         panel.level = NSWindow.Level(rawValue: CaptureRegionOverlay.level.rawValue + 1)
-        panel.isOpaque = false; panel.backgroundColor = .clear; panel.hasShadow = true
-        panel.hidesOnDeactivate = false; panel.isReleasedWhenClosed = false; panel.isMovableByWindowBackground = true
+        panel.isOpaque = false; panel.backgroundColor = .clear; panel.hasShadow = false
+        panel.hidesOnDeactivate = false; panel.isReleasedWhenClosed = false; panel.isMovableByWindowBackground = false
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]; panel.sharingType = .none
-        panel.contentView = NSHostingView(rootView: ScrollingCaptureHUD(controller: self))
-        let visible = screen.visibleFrame
-        let below = selected.minY - panel.frame.height - 12
-        let above = selected.maxY + 12
-        let y = below >= visible.minY ? below : above + panel.frame.height <= visible.maxY ? above : visible.minY + 12
-        panel.setFrameOrigin(CGPoint(x: min(max(selected.midX - 220, visible.minX + 8), visible.maxX - 448), y: y))
+        let glass = NSVisualEffectView(frame: CGRect(origin: .zero, size: panelFrame.size))
+        glass.material = .hudWindow; glass.blendingMode = .withinWindow; glass.state = .active
+        glass.wantsLayer = true; glass.layer?.cornerRadius = 12; glass.layer?.masksToBounds = true
+        let host = NSHostingView(rootView: ScrollingCaptureHUD(controller: self))
+        host.frame = glass.bounds; host.autoresizingMask = [.width, .height]; glass.addSubview(host)
+        panel.contentView = glass
         toolbar = panel
         target?.activate(options: [.activateIgnoringOtherApps])
         panel.orderFrontRegardless()
@@ -115,12 +128,13 @@ final class ScrollingCaptureController: ObservableObject {
             if event.keyCode == 53 { self?.cancel(); return nil }
             return event
         }
+        releaseSelection?(); releaseSelection = nil
         sample()
     }
     func begin() {
         guard !started, !processing, stitcher.last != nil else { return }
         if mode == .automatic && target == nil && !synthetic { mode = .manual }
-        if mode == .automatic && !synthetic && !Permissions.requireEventPosting(operation: "长截图自动滚动") { mode = .manual; return }
+        if mode == .automatic && !synthetic && !Permissions.requireEventPosting(operation: "长截图自动滚动") { mode = .manual }
         started = true; startedAt = Date(); message = mode == .automatic ? "正在自动滚动 · 到底后自动完成" : "在选区内向下滚动 · 无需重新框选"
         target?.activate(options: [.activateIgnoringOtherApps])
         if mode == .automatic { scroll() }
@@ -136,12 +150,18 @@ final class ScrollingCaptureController: ObservableObject {
         if let targetPID = target?.processIdentifier,
            let owner = Self.targetPID(at: CGPoint(x: captureRect.midX, y: captureRect.midY), windows: Self.visibleTargetWindows()),
            owner != targetPID {
-            if !paused { paused = true; pausedForOcclusion = true; message = "选区被其他窗口遮挡 · 返回后自动继续" }
+            if !paused {
+                paused = true; pausedForOcclusion = true; message = "选区被其他窗口遮挡 · 返回后自动继续"
+            }
             return
         }
         if pausedForOcclusion { pausedForOcclusion = false; paused = false; message = "选区已恢复，继续捕获" }
         guard !paused, Date() >= nextSampleAt else { return }
         sample()
+    }
+    func retryFirstSample() {
+        guard !started, !processing, count == 0 else { return }
+        paused = false; sample()
     }
     private func sample() {
         guard !processing, let anchor = overlay?.captureAnchor else { return }
@@ -191,6 +211,10 @@ final class ScrollingCaptureController: ObservableObject {
                     if self.finalSample { self.completeOutput() } else { self.sampleFinalFrame() }
                     return
                 }
+                if self.startAfterFirstSample && self.count > 0 {
+                    self.startAfterFirstSample = false; self.begin()
+                    return
+                }
                 if self.started && !self.paused && self.mode == .automatic {
                     if self.idleFrames >= 4 {
                         if self.count <= 1 {
@@ -211,10 +235,14 @@ final class ScrollingCaptureController: ObservableObject {
         }
         guard let target = target, !target.isTerminated else { paused = true; message = "目标应用已退出，请完成或取消"; return }
         let distance = min(400, Int(captureRect.height * (slow ? 0.20 : 0.38)))
+        let point = CGPoint(x: captureRect.midX, y: captureRect.midY)
+        guard Self.targetPID(at: point, windows: Self.visibleTargetWindows()) == target.processIdentifier else {
+            paused = true; pausedForOcclusion = true; message = "选区被其他窗口遮挡 · 返回后自动继续"; return
+        }
         guard let event = CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 1, wheel1: -Int32(max(12, distance)), wheel2: 0, wheel3: 0) else { return }
-        event.location = CGPoint(x: captureRect.midX, y: captureRect.midY)
+        event.location = point
         nextSampleAt = Date().addingTimeInterval(0.45)
-        event.postToPid(target.processIdentifier)
+        event.post(tap: .cghidEventTap)
     }
     func togglePause() {
         guard started, !finishing else { return }
@@ -261,7 +289,7 @@ final class ScrollingCaptureController: ObservableObject {
     static func targetPID(at point: CGPoint, windows: [CaptureWindowTarget]) -> pid_t? {
         windows.first { $0.bounds.contains(point) }?.pid
     }
-    private static func visibleTargetWindows() -> [CaptureWindowTarget] {
+    static func visibleTargetWindows() -> [CaptureWindowTarget] {
         guard let windows = CGWindowListCopyWindowInfo(.optionOnScreenOnly, kCGNullWindowID) as? [[String: Any]] else { return [] }
         return windows.compactMap { window in
             guard let pid = window[kCGWindowOwnerPID as String] as? Int32, pid != ProcessInfo.processInfo.processIdentifier,
@@ -297,39 +325,40 @@ final class ScrollingCaptureController: ObservableObject {
 struct ScrollingCaptureHUD: View {
     @ObservedObject var controller: ScrollingCaptureController
     var body: some View {
-        HStack(alignment: .top, spacing: 14) {
-            VStack(spacing: 5) {
-                if let image = controller.preview { Image(nsImage: image).resizable().scaledToFit().frame(width: 66, height: 100) }
-                else { Image(systemName: "rectangle.dashed").font(.system(size: 28)).frame(width: 66, height: 100) }
-                Text("\(controller.height) px").font(.system(size: 10)).monospacedDigit().foregroundColor(.secondary)
+        VStack(spacing: 9) {
+            HStack {
+                CaptureModeTabs(scrolling: .constant(true)).disabled(true)
+                Text(controller.started ? "捕获中" : "准备中").font(.system(size: 10)).foregroundColor(.secondary)
+                Spacer()
             }
-            VStack(alignment: .leading, spacing: 10) {
-                HStack {
-                    Label("滚动长截图", systemImage: "rectangle.expand.vertical").font(.system(size: 13, weight: .semibold))
-                    Spacer()
-                    Text(controller.count > 1 ? "已拼接 \(controller.count) 段" : controller.count == 1 ? "仅首帧 · 待滚动" : "准备中")
-                        .font(.system(size: 10)).foregroundColor(controller.count == 1 && controller.started ? .orange : .secondary)
-                }
+            HStack(spacing: 8) {
                 Picker("滚动方式", selection: $controller.mode) {
-                    ForEach(ScrollingCaptureController.Mode.allCases, id: \.self) { mode in Text(mode.rawValue).tag(mode) }
-                }.pickerStyle(.segmented).disabled(controller.started && !controller.paused)
-                Text(controller.message).font(.system(size: 11)).foregroundColor(.secondary).lineLimit(2).frame(height: 30, alignment: .leading)
-                HStack(spacing: 8) {
-                    Button("取消") { controller.cancel() }.help("Esc 取消，保留原剪贴板")
-                    if controller.started {
-                        Button(controller.paused ? "继续" : "暂停") { controller.togglePause() }
-                        Spacer()
-                        Button(controller.count > 1 ? "完成" : "保存当前区域") { controller.finish() }
-                            .buttonStyle(.borderedProminent).disabled(controller.finishing)
-                    } else {
-                        Toggle("慢速", isOn: $controller.slow).toggleStyle(.checkbox).font(.system(size: 11))
-                        Spacer()
-                        Button("开始捕获") { controller.begin() }.buttonStyle(.borderedProminent).disabled(controller.processing || controller.count == 0)
-                    }
-                }.controlSize(.small)
+                    Text("自动").tag(ScrollingCaptureController.Mode.automatic)
+                    Text("手动").tag(ScrollingCaptureController.Mode.manual)
+                }.pickerStyle(.segmented).labelsHidden().frame(width: 110).disabled(controller.started && !controller.paused)
+                if let image = controller.preview {
+                    Image(nsImage: image).resizable().scaledToFit().frame(width: 42, height: 42)
+                } else {
+                    Image(systemName: "rectangle.dashed").frame(width: 42, height: 42)
+                }
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(controller.count > 1 ? "已拼接 \(controller.count) 段 · \(controller.height) px" : controller.count == 1 ? "仅首帧 · \(controller.height) px" : "准备中")
+                        .font(.system(size: 10)).foregroundColor(controller.count == 1 && controller.started ? .orange : .secondary)
+                    Text(controller.message).font(.system(size: 11)).foregroundColor(.secondary).lineLimit(2)
+                }
+                Spacer(minLength: 0)
+                Button("取消") { controller.cancel() }.help("Esc 取消，保留原剪贴板")
+                if controller.started {
+                    Button(controller.paused ? "继续" : "暂停") { controller.togglePause() }
+                    Button(controller.count > 1 ? "完成" : "保存当前区域") { controller.finish() }
+                        .buttonStyle(RegionCaptureCompleteStyle()).disabled(controller.finishing)
+                } else {
+                    Button(controller.count == 0 && !controller.processing ? "重试" : "开始捕获") {
+                        if controller.count == 0 { controller.retryFirstSample() } else { controller.begin() }
+                    }.buttonStyle(RegionCaptureCompleteStyle()).disabled(controller.processing)
+                }
             }
-        }.padding(16).frame(width: 440, height: 176)
-            .background(FrostedBackground()).cornerRadius(14)
-            .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.primary.opacity(0.08)))
+        }.padding(10).buttonStyle(.bordered).controlSize(.small)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 }

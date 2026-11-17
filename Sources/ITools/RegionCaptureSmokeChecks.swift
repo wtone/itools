@@ -73,6 +73,33 @@ enum RegionCaptureSmokeChecks {
             throw UserFacingError("Smoke: releasing a region finishes capture rather than allowing adjustment")
         }
         print("PASS: frozen screenshot workspaces cover three displays; reverse selection leaves mask, canvas and toolbar open without completing")
+        let tab = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0,
+                                   windowNumber: window.windowNumber, context: nil, characters: "\t",
+                                   charactersIgnoringModifiers: "\t", isARepeat: false, keyCode: 48)!
+        guard view.handleModeShortcut(tab), view.mode.scrolling else { throw UserFacingError("Smoke: Tab did not switch to scrolling mode") }
+        try preview("region-scroll-tab")
+        let localSelection = view.selection!
+        let localToolbar = RegionCaptureWorkspace.toolbarFrame(selection: localSelection, bounds: view.bounds)
+        for display in displays {
+            let globalSelection = localSelection.offsetBy(dx: display.frame.minX, dy: display.frame.minY)
+            let globalToolbar = RegionCaptureWorkspace.toolbarFrame(selection: globalSelection, bounds: display.frame)
+            guard globalToolbar == localToolbar.offsetBy(dx: display.frame.minX, dy: display.frame.minY) else {
+                throw UserFacingError("Smoke: capture toolbar moved when starting on an extended display")
+            }
+        }
+        print("PASS: scrolling controls retain the selected toolbar position across multiple displays")
+        var handoff: (CGDirectDisplayID, CGRect, Bool, Bool)?
+        view.onScroll = { handoff = ($0, $1, $2, $3) }
+        view.mode.automatic = false; view.mode.slow = true; view.startScrolling()
+        guard let handoff = handoff, handoff.0 == displays[0].id, handoff.1 == initial, !handoff.2, handoff.3,
+              view.handleModeShortcut(tab), !view.mode.scrolling, view.document.captureRegion == initial else {
+            throw UserFacingError("Smoke: switching modes lost selection or scrolling options")
+        }
+        let ocr = RegionCaptureWorkspace(display: displays[0], snapshot: images[0], allowScrolling: false)
+        ocr.document.captureRegion = initial
+        guard !ocr.handleModeShortcut(tab), !ocr.mode.scrolling else { throw UserFacingError("Smoke: OCR switched into scrolling mode") }
+        print("PASS: Tab switches capture modes, hands off selected display and native pixels, preserves selection, and leaves OCR unchanged")
+
 
         view.canvas.mouseDown(with: mouse(.leftMouseDown, CGPoint(x: 350, y: 320)))
         view.canvas.mouseDragged(with: mouse(.leftMouseDragged, CGPoint(x: 390, y: 350)))

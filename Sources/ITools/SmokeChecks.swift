@@ -4,10 +4,12 @@ import SwiftUI
 import IToolsCore
 
 enum SmokeChecks {
-    // Entirely synthetic content. These checks never capture the desktop or touch the general pasteboard.
+    // Default checks use synthetic content and do not capture the desktop or touch the general pasteboard.
+    // The optional fixture check captures the dedicated synthetic window for live verification.
     static func run(model: AppModel, destination: URL) throws {
         try CaptureRegionSmokeChecks.run(destination: destination)
         try ScrollingCaptureSmokeChecks.run(destination: destination)
+        if ProcessInfo.processInfo.arguments.contains("--scroll-fixture-check") { try ScrollingCaptureSmokeChecks.runLiveFixture(model: model) }
         try AnnotationInteractionSmokeChecks.run(destination: destination)
         try RegionCaptureSmokeChecks.run(destination: destination)
         let qrText = "https://example.com/测试?message=你好"
@@ -189,7 +191,7 @@ enum SmokeChecks {
         }
         try exportEditorPreview(EditorView(capture: captureService, document: document).padding(16), name: "editable-editor-light", width: 800, height: 650, appearance: .aqua)
         try exportEditorPreview(EditorView(capture: captureService, document: document).padding(16), name: "editable-editor-dark", width: 620, height: 650, appearance: .darkAqua)
-        try exportEditorPreview(ScrollingCaptureHUD(controller: ScrollingCaptureController()), name: "scrolling-hud", width: 440, height: 176, appearance: .aqua)
+        try exportEditorPreview(ScrollingCaptureHUD(controller: ScrollingCaptureController()), name: "scrolling-hud", width: 610, height: 132, appearance: .aqua)
         testWindow.close()
         print("PASS: editable objects move/resize using canvas events; text edit, crop, deletion undo/redo preserve objects")
         if ProcessInfo.processInfo.arguments.contains("--capture-editor-check") { return }
