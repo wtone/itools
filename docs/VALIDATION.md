@@ -348,7 +348,7 @@
 - Debug 完整原生 GUI 回归通过。首轮 Release 的本次剪贴板流程通过，后续快捷键工作台出现一次录入焦点断言失败；另两次完整流程分别在浮层失焦关闭、搜索结果断言处中止。相关日志完整保留，不能据此宣称完整 Release 回归全部通过。未降低原检查标准；增加仅运行剪贴板流程的诊断入口，在启动事务结束后执行，以便独立复核真实焦点和按键行为。
 - 上述日志：`.build/clipboard-record-focus-debug-smoke.log`、`clipboard-record-focus-release-smoke.log`、`clipboard-record-focus-release-smoke-verified.log`、`clipboard-record-focus-release-smoke-final.log`。一次测试启动遭遇自动审批超时，重试后启动成功。
 - 最终 Release 构建的独立原生验证通过：三种面板的初始焦点均为 FloatingToolPanel，进入搜索后实际 field editor 保持当前响应者、查询为 42、结果一条且额外执行次数为零；数字复制、输入法保护及退出搜索恢复数字选择全部通过。日志 `.build/clipboard-record-focus-isolated.log`，构建 `.build/clipboard-record-focus-final-build.log`。布局和提示预览来自本轮通过的 Debug 完整回归，已同步文档。
-- 已安装并打开 `/Applications/iTools.app` **0.13.5 / build 26**。4 份清单与 5 个 Intel 二进制的 macOS 12 部署目标一致，构建与安装哈希相同；严格签名及固定本地签名身份校验通过。备份：`/Users/wtone/www/itools/.build/install-backups/iTools-0.13.4-ee1c4412-e07b-4199-9dcf-2e6e9e891143.zip`。
+- 已安装并打开 `/Applications/iTools.app` **0.13.5 / build 26**。4 份清单与 5 个 Intel 二进制的 macOS 12 部署目标一致，构建与安装哈希相同；严格签名及固定本地签名身份校验通过。备份：`.build/install-backups/iTools-0.13.4-ee1c4412-e07b-4199-9dcf-2e6e9e891143.zip`。
 - `dist/iTools-0.13.5-intel.zip` 完整性通过，SHA256：`455b06deb1e88d4f3e0662547832761d35d9a7ee4a86e148902281de3fa7f274`。日志 `.build/clipboard-record-focus-install.log`、`clipboard-record-focus-binaries.log`、`clipboard-record-focus-package.log`。实机 Intel / macOS 13.7.8；未改动隐私权限、用户偏好或实际剪贴板内容。
 
 ## 0.13.6 快捷剪贴板滚轮与悬停分类（2026-09-11）

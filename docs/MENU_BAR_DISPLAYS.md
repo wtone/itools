@@ -24,7 +24,7 @@ macOS 版本不支持现有单屏限定兼容层时，多屏单屏模式沿用�
 ## 验证
 
 ```bash
-cd /Users/wtone/www/itools
+# 在仓库根目录运行
 ./scripts/test.sh
 swift build --disable-sandbox --cache-path .build/cache --scratch-path .build --configuration debug --arch arm64
 ITOOLS_SMOKE_OUTPUT="$PWD/.build/menu-display-native" \
